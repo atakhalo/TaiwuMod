@@ -135,8 +135,9 @@ namespace Minutiae
         public static bool restFilter; // 开关 空闲筛选
 
         public static bool selectAllEnable = true; // 开关 全选中
-        public static bool whenSelectAll; // 开关 全选中
-        public static string selectAllText; // 开关 全选中
+        public static bool selectGrade = false; // 开关 拆解全选非贵重
+        public static bool whenSelectAll; // 全选中, 跳过选数量ui
+        public static string selectAllText; // 全选文本 替换 处理选项
 
         public static bool sortZizhi = true; // 开关 资质排序
         public static bool showZizhi = true; // 开关 资质显示
@@ -166,7 +167,10 @@ namespace Minutiae
             ModManager.GetSetting(ModIdStr, "lockCore", ref lockCore);
             ModManager.GetSetting(ModIdStr, "showEfficiency", ref showEfficiency);
             ModManager.GetSetting(ModIdStr, "restFilter", ref restFilter);
+
             ModManager.GetSetting(ModIdStr, "selectAllEnable", ref selectAllEnable);
+            ModManager.GetSetting(ModIdStr, "selectGrade", ref selectGrade);
+
             ModManager.GetSetting(ModIdStr, "sortZizhi", ref sortZizhi);
             ModManager.GetSetting(ModIdStr, "showZizhi", ref showZizhi);
 
@@ -725,18 +729,36 @@ namespace Minutiae
             bool toClick = true;
             string content = "";
             bool toSelect = true;
+            sbyte grade = -1;
+            bool checkTool = aTog.Key == (int)EItemOperationType.Disassemble;
             if (aTog.Key == (int)EItemOperationType.Repair || aTog.Key == (int)EItemOperationType.Disassemble)
             {
                 toClick = false;
                 var items = __instance.CurMultiplyScrollView.SortAndFilter.OutputItemList;
                 if (items.Count > 0)
                 {
-                    if (__instance.SelectedMultiplyItemOrderedList.Contains(items[0]))
+                    if (__instance.SelectedMultiplyItemOrderedList.Contains(items[0])) // 第一个已经被选
                         toSelect = false;
+                    else
+                    {
+                        if(selectGrade && aTog.Key == (int)EItemOperationType.Disassemble) // 贵重只影响拆解
+                        {
+                            grade = GetMultiplyGrade(__instance);
+                        }
+                    }
                 }
                 if (toSelect)
                 {
                     content = "是否全选?\n";
+                    if (grade == -1) { }
+                    else
+                    {
+                        // 看 GetItemGradeShortNameWithMoreThan
+                        sbyte downGrade = (sbyte)(grade - 1);
+                        var gradeText = ItemView.GetGradeText(downGrade).SetColor(Colors.Instance.GradeColors[downGrade]);
+                        var gradeStr = gradeText + "·" + CommonUtils.GetItemGradeShortName(downGrade) + "" + LocalStringManager.Get(LanguageKey.LK_Grade_LessThan);
+                        content += $"({gradeStr})";
+                    }
                 }
                 else
                 {
@@ -752,7 +774,7 @@ namespace Minutiae
                 Title = "全选",
                 Content = content,
                 Type = 1, // 1是 两个按钮，2是一个按钮； 4是两个按钮显示字
-                Yes = () => SelectAll(__instance, toClick, toSelect),
+                Yes = () => SelectAll(__instance, toClick, toSelect, grade, checkTool),
                 //No = ()=> MyLog($"lalaala"),
                 //GroupYesText = "全选",
                 //GroupNoText = "取消"
@@ -762,7 +784,7 @@ namespace Minutiae
             return false;
         }
 
-        public static void SelectAll(MultiplyItemScrollView __instance, bool toClick, bool toSelect)
+        public static void SelectAll(MultiplyItemScrollView __instance, bool toClick, bool toSelect, int grade, bool checkTool)
         {
             whenSelectAll = true;
             var items = __instance.CurMultiplyScrollView.SortAndFilter.OutputItemList;
@@ -771,6 +793,15 @@ namespace Minutiae
 
             foreach (ItemDisplayData item in items)
             {
+                if (grade != -1 && item.Grade >= grade)
+                    continue;
+                //if(checkTool)  // 看 MultiplyItemScrollView OnRenderItemMultiply 没有用，一直返回0
+                //{
+                //    var tool = __instance.GetAvailableToolList(item);
+                //    MyUtils.MyLog($"checkTool {item.Grade} {tool?.Count}");
+                //    if (tool == null || tool.Count == 0)
+                //        continue;
+                //}
                 if(toClick)
                 {
                     var view = __instance.CurMultiplyScrollView.FindItemViewByItem(item.Key);
@@ -793,6 +824,15 @@ namespace Minutiae
             }
             //MyLog($" after {__instance.SelectedMultiplyItemOrderedList.Count}");
             whenSelectAll = false;
+        }
+
+        public static sbyte GetMultiplyGrade(MultiplyItemScrollView __instance)
+        {
+            var type = Traverse.Create(__instance).Property("CurItemGradeFilterSourceType").GetValue<ItemGradeFilterSetting.ItemGradeFilterSourceType>();
+            var setting = SingletonObject.getInstance<GameSort>().GetItemGradeFilterSetting();
+            var grade = setting.GetGrade(type);
+            var index = setting.GetIndex(type);
+            return grade;
         }
 
         // 阻止调用 选数ui，直接回调
@@ -864,7 +904,7 @@ namespace Minutiae
             List<CButton> r = new List<CButton>();
             Refers refers = null;
             CButton btnMultiplyOption;
-            if (__instance.Names.Contains("Inventory"))
+            if (__instance.IsInventoryMultiply) // 这个值在点击批量或贵重按钮的时候才被赋值，其他地方不可用
             {
                 refers = __instance.CGet<Refers>("Inventory");
                 if (refers != null)
@@ -875,7 +915,7 @@ namespace Minutiae
                     }
                 }
             }
-            if (__instance.Names.Contains("Warehouse"))
+            else
             {
                 refers = __instance.CGet<Refers>("Warehouse");
                 if (refers != null)
