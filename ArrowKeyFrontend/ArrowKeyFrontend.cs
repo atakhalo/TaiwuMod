@@ -328,7 +328,7 @@ namespace ArrowKey
             rect.anchoredPosition = Vector2.zero;
             rect.localPosition = Vector2.zero;
             rect.localScale = Vector2.one;
-            MyUtils.MyLog($"CycleTipsText {rect.anchoredPosition}  {rect.localPosition} {rect.localScale}");
+            //MyUtils.MyLog($"CycleTipsText {rect.anchoredPosition}  {rect.localPosition} {rect.localScale}");
         }
 
         public static void TipsParent(Transform parent)
@@ -421,6 +421,7 @@ namespace ArrowKey
                 var btn = transform.GetComponent<Button>();
                 if (CheckButton(btn))
                 {
+                    MyUtils.MyLog($"FindButtonFirst 找到 button {btn.name}");
                     button = btn;
                     isSelf = true;
                     index = -2;
@@ -428,6 +429,8 @@ namespace ArrowKey
                 }
             }
             if (endIndex == -1) endIndex = transform.childCount;
+
+            MyUtils.MyLog($"FindButtonFirst {transform.name} 有{transform.childCount}个， 查找范围[{startIndex}, {endIndex})");
             for (int i = startIndex; i < endIndex; i++)
             {
                 if (FindButtonFirst(transform.GetChild(i), out button, out var child, out var childIndex, checkSelf=true))
@@ -440,13 +443,15 @@ namespace ArrowKey
             return false;
         }
         public static bool FindButtonLast(Transform transform, out Button button, out bool isSelf, out int index,
-            bool checkSelf = true, int rStartIndex = -1, int rEndIndex = 0)
+            bool checkSelf = true, int rStartIndex = -2, int rEndIndex = 0)
         {
             button = default;
             isSelf = false;
             index = -1;
+            if (rStartIndex == -1) return false;
             if(!CheckObjShow(transform.gameObject)) return false;
-            if(rStartIndex == -1) rStartIndex = transform.childCount - 1;
+            if(rStartIndex == -2) rStartIndex = transform.childCount - 1;
+            MyUtils.MyLog($"FindButtonLast {transform.name} 有{transform.childCount}个， 查找范围[{rEndIndex}, {rStartIndex})");
             for (int i = rStartIndex; i >= rEndIndex; i--)
             {
                 if(FindButtonLast(transform.GetChild(i), out button, out var child, out var childIndex, checkSelf=true))
@@ -461,6 +466,7 @@ namespace ArrowKey
                 var btn = transform.GetComponent<Button>();
                 if (CheckButton(btn))
                 {
+                    MyUtils.MyLog($"FindButtonLast 找到 button {btn.name}");
                     button = btn;
                     isSelf = true;
                     index = -2;
@@ -533,6 +539,7 @@ namespace ArrowKey
                 curButtonBg = null;
             }
             TipsParent(button.transform);
+            MyUtils.MyLog($"moveto {button.name}");
         }
         public static Image GetButtonBg(Button button)
         {
@@ -624,17 +631,15 @@ namespace ArrowKey
             return null;
         }
         /// <summary>
-        /// 只在同级查找按钮
+        /// 只在父级下查找按钮
         /// </summary>
         public static Button FindBtnNext(Button button)
         {
             var index = button.transform.GetSiblingIndex();
             var parent = button.transform.parent;
-            for (int i = index + 1; i < parent.childCount; i++)
+            if (FindButtonFirst(parent, out var button1, out var _, out var _, checkSelf: false, startIndex: index + 1))
             {
-                var child = parent.GetChild(i);
-                Button btn = IsObjFindBtn(child);
-                if (btn) return btn;
+                return button1;
             }
             return null;
         }
@@ -642,11 +647,9 @@ namespace ArrowKey
         {
             var index = button.transform.GetSiblingIndex();
             var parent = button.transform.parent;
-            for (int i = index - 1; i >= 0; i--)
+            if (FindButtonLast(parent, out var button1, out var isSelf, out var _, checkSelf: false, rStartIndex: index - 1))
             {
-                var child = parent.GetChild(i);
-                Button btn = IsObjFindBtn(child);
-                if (btn) return btn;
+                return button1;
             }
             return null;
         }
@@ -676,24 +679,20 @@ namespace ArrowKey
         public static Button FindBtnJumpNext(Button button)
         {
             var parent = button.transform.parent; // 不判断父节点
-            //var index = parent.GetSiblingIndex();
+            MyUtils.MyLog($"FindBtnJumpNext 跳过{parent.name}  从 {parent.parent.name}查找");
             if (parent == null) return null;
-            return JumpNextUp(button.transform.parent);
-            //var pparent = parent.parent; // 从二级父节点开始查，跳过当前父节点，查找第一个按钮
-            //if(FindButtonFirst(pparent, out var button1, out var isSelf, out var index1, checkSelf:false, startIndex: index+1))
-            //{
-            //    return button1;
-            //}
-            //return null;
+            return JumpNextUp(parent);
         }
         public static Button JumpNextUp(Transform transform)
         {
             if (!transform) return null;
-            if (transform.GetComponent<UIBase>()) return null;
+            if (transform.GetComponent<UIBase>()) { MyUtils.MyLog("JumpNextUp 已到ui节点，结束"); return null; }
             var index = transform.GetSiblingIndex();
             var parent = transform.parent;
+            MyUtils.MyLog($"JumpNextUp 开始查找{parent.name}下 {index} 后的节点");
             if (FindButtonFirst(parent, out var button1, out var _, out var _, checkSelf: false, startIndex: index + 1))
             {
+                MyUtils.MyLog($"JumpNextUp 找到{button1.name}");
                 return button1;
             }
             return JumpNextUp(parent);
@@ -703,29 +702,22 @@ namespace ArrowKey
         {
             var parent = button.transform.parent; // 不判断父节点
             if (parent == null) return null;
-            return JumpLastUp(button.transform.parent);
-
-            //var parent = button.transform.parent; // 不判断父节点
-            //var index = parent.GetSiblingIndex();
-            //if (parent == null) return null;
-            //var pparent = parent.parent; // 从二级父节点开始查，跳过当前父节点，查找第一个按钮
-            //if (FindButtonLast(pparent, out var button1, out var isSelf, out var index1, checkSelf: false, rStartIndex: index-1))
-            //{
-            //    return button1;
-            //}
-            //return null;
+            MyUtils.MyLog($"FindBtnJumpLast 跳过{parent.name} 从 {parent.parent.name}查找");
+            return JumpLastUp(parent);
         }
         public static Button JumpLastUp(Transform transform)
         {
             if (!transform) return null;
-            if (transform.GetComponent<UIBase>()) return null;
+            if (transform.GetComponent<UIBase>()) { MyUtils.MyLog("JumpLastUp 已到ui节点，结束"); return null; }
             var index = transform.GetSiblingIndex();
             var parent = transform.parent;
-            if (FindButtonLast(parent, out var button1, out var isSelf, out var _, checkSelf: false, rStartIndex: index - 1))
+            MyUtils.MyLog($"JumpNextUp 开始查找{parent.name}下 {index} 前的节点");
+            if (FindButtonLast(parent, out var button1, out var _, out var _, checkSelf: false, rStartIndex: index - 1))
             {
+                MyUtils.MyLog($"JumpLastUp 找到{button1.name}");
                 return button1;
             }
-            return JumpNextUp(parent);
+            return JumpLastUp(parent);
         }
         public static void MoveNext()
         {

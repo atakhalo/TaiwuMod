@@ -122,7 +122,7 @@ namespace Minutiae
     }
 
 
-    [PluginConfig(pluginName: "Minutiae", creatorId: "atakhalo", pluginVersion: "2025.10.29.1")]
+    [PluginConfig(pluginName: "Minutiae", creatorId: "atakhalo", pluginVersion: "2025.11.4.1")]
     public class MinutiaeFrontendPlugin : TaiwuRemakePlugin
     {
         private Harmony harmony;
@@ -946,6 +946,7 @@ namespace Minutiae
         }
         public static bool IsClickName(RectTransform rectTransform)
         {
+            if(!rectTransform.gameObject.activeInHierarchy) return false;
             var canvas = rectTransform.GetComponentInParent<Canvas>();
             return RectTransformUtility.RectangleContainsScreenPoint(rectTransform, Input.mousePosition, canvas.worldCamera);
         }

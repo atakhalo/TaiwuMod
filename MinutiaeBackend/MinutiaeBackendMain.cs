@@ -2,6 +2,7 @@
 using GameData.Common;
 using GameData.Domains;
 using GameData.Domains.Character;
+using GameData.Domains.Combat;
 using GameData.Domains.CombatSkill;
 using GameData.Domains.Extra;
 using GameData.Domains.Item;
@@ -12,6 +13,7 @@ using GameData.Serializer;
 using GameData.Utilities;
 using HarmonyLib;
 using NLog;
+using NLog.Fluent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using TaiwuModdingLib.Core.Plugin;
@@ -19,11 +21,13 @@ using TaiwuModdingLib.Core.Plugin;
 namespace MinutiaeBackend
 {
 
-    [PluginConfig(pluginName: "Minutiae", creatorId: "atakhalo", pluginVersion: "2025.10.13.1")]
+    [PluginConfig(pluginName: "Minutiae", creatorId: "atakhalo", pluginVersion: "2025.11.3.1")]
     public class MinutiaeBackendPlugin : TaiwuRemakePlugin
     {
         private Harmony harmony;
         public static bool noPenalty; // 开关 取消宴堂惩罚
+        public static bool skipFinish = true; // 开关 战斗读书不读已完的书
+
         private static readonly Logger logger = LogManager.GetCurrentClassLogger();
         
         public override void Initialize()
@@ -43,6 +47,7 @@ namespace MinutiaeBackend
         public override void OnModSettingUpdate()
         {
             DomainManager.Mod.GetSetting(ModIdStr, "noPenalty", ref noPenalty);
+            DomainManager.Mod.GetSetting(ModIdStr, "skipFinish", ref skipFinish);
         }
 
         [HarmonyPrefix, HarmonyPatch(typeof(ExtraDomain), "FeastEmptyPenalty")]
@@ -190,5 +195,22 @@ namespace MinutiaeBackend
 
             return array;
         }
+
+        #region 战斗读书跳过已完
+        [HarmonyPrefix, HarmonyPatch(typeof(CombatDomain), "CalcReadInCombat")]
+        public static bool CalcReadInCombat(CombatDomain __instance, DataContext context)
+        {
+            if(!skipFinish) return true;
+            ItemKey currBook = DomainManager.Taiwu.GetCurReadingBook();
+            if(currBook.IsValid() && DomainManager.Taiwu.GetTotalReadingProgress(currBook.Id) >= 100)
+            {
+                return false;
+            }
+            else
+            {
+                return true;
+            }
+        }
+        #endregion
     }
 }
