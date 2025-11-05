@@ -182,7 +182,7 @@ namespace ArrowKey
 
         public static List<GameObject> pagePath;
         public static GameObject lastPage;
-        public static Button curButton; // 当前挂着的按钮
+        public static Selectable curButton; // 当前挂着的按钮
         public static Image curButtonBg; // 当前挂着的按钮的背景
         public static Color btnColor; // 当前挂着的按钮原来的颜色
 
@@ -410,7 +410,7 @@ namespace ArrowKey
             }
             return false;
         }
-        public static bool FindButtonFirst(Transform transform, out Button button, out bool isSelf, out int index, 
+        public static bool FindButtonFirst(Transform transform, out Selectable button, out bool isSelf, out int index, 
             bool checkSelf=true, int startIndex=0, int endIndex = -1, bool loop = false)
         {
             button = default;
@@ -419,7 +419,7 @@ namespace ArrowKey
             if (!CheckObjShow(transform.gameObject)) return false;
             if(checkSelf)
             {
-                var btn = transform.GetComponent<Button>();
+                var btn = transform.GetComponent<Selectable>();
                 if (CheckButton(btn))
                 {
                     MyUtils.MyLog($"FindButtonFirst 找到 button {btn.name}");
@@ -444,7 +444,7 @@ namespace ArrowKey
             }
             return false;
         }
-        public static bool FindButtonLast(Transform transform, out Button button, out bool isSelf, out int index,
+        public static bool FindButtonLast(Transform transform, out Selectable button, out bool isSelf, out int index,
             bool checkSelf = true, int rStartIndex = -2, int rEndIndex = 0, bool loop=false)
         {
             button = default;
@@ -466,7 +466,7 @@ namespace ArrowKey
             }
             if(checkSelf)
             {
-                var btn = transform.GetComponent<Button>();
+                var btn = transform.GetComponent<Selectable>();
                 if (CheckButton(btn))
                 {
                     MyUtils.MyLog($"FindButtonLast 找到 button {btn.name}");
@@ -481,7 +481,7 @@ namespace ArrowKey
         /// <summary>
         /// 找到同级的第一个按钮
         /// </summary>
-        public static bool GetButtonSibiFirst(Button buttonIn, out Button buttonOut, out int index)
+        public static bool GetButtonSibiFirst(Selectable buttonIn, out Selectable buttonOut, out int index)
         {
             buttonOut = buttonIn;
             index = -1;
@@ -492,7 +492,7 @@ namespace ArrowKey
                 var child = parent.GetChild(i);
                 if (!CheckObjShow(child.gameObject))
                     continue;
-                var btn = child.GetComponent<Button>();
+                var btn = child.GetComponent<Selectable>();
                 if (CheckButton(btn))
                 {
                     buttonOut = btn;
@@ -505,14 +505,14 @@ namespace ArrowKey
         }
         public static bool CheckObjShow(GameObject obj)
         {
-            return obj.activeInHierarchy && CheckTransformScale(obj.transform);
+            return obj.activeInHierarchy && CheckTransformScale(obj.transform) && CheckTooHeight(obj.transform);
         }
         /// <summary>
         /// 有些界面是通过直接y值设置到9000来“隐藏”的
         /// </summary>
         public static bool CheckTooHeight(Transform transform)
         {
-            return transform.position.y > 5000; // 判断个5000应该够了
+            return transform.localPosition.y <= 5000; // 判断个5000应该够了
         }
 
         public static bool CheckTransformScale(Transform transform)
@@ -522,7 +522,7 @@ namespace ArrowKey
                 return true;
             return false;
         }
-        public static bool CheckButton(Button btn)
+        public static bool CheckButton(Selectable btn)
         {
             if(btn != null && btn.gameObject.activeInHierarchy && btn.interactable)
             {
@@ -534,7 +534,7 @@ namespace ArrowKey
         /// 将 tipstext 移动到该按钮
         /// </summary>
         /// <param name="button"></param>
-        public static void MoveTo(Button button)
+        public static void MoveTo(Selectable button)
         {
             RelButton(); // 先释放当前的
             curButton = button;
@@ -556,22 +556,25 @@ namespace ArrowKey
         /// <summary>
         /// 判断按钮是否在 滚动列表里，如果是的话调用 
         /// </summary>
-        public static void TryScrollTo(Button btn)
+        public static void TryScrollTo(Selectable btn)
         {
             if(curButton.GetComponent<Refers>())
             {
                 var p = btn.transform.parent?.parent?.parent;
                 if(p && p.GetComponent<InfinityScroll>())
                 {
-                    var indexTo = Math.Max(0, int.Parse(btn.name) - 1);
-                    p.GetComponent<InfinityScroll>().ScrollTo(indexTo);
+                    if(int.TryParse(btn.name, out var index))
+                    {
+                        var indexTo = Math.Max(0, index - 1);
+                        p.GetComponent<InfinityScroll>().ScrollTo(indexTo);
+                    }
                 }
             }
         }
 
 
 
-        public static Image GetButtonBg(Button button)
+        public static Image GetButtonBg(Selectable button)
         {
             if (button.GetComponent<Image>())
             {
@@ -591,6 +594,10 @@ namespace ArrowKey
                         return bg.GetComponentInChildren<Image>();
                     }
                 }
+                else
+                {
+                    return button.GetComponentInChildren<Image>();
+                }
             }
             return null;
         }
@@ -608,7 +615,33 @@ namespace ArrowKey
         {
             var button = curButton;
             ToExit();
-            button.onClick?.Invoke();
+            var btn = button.GetComponent<Button>();
+            if (btn != null) btn.onClick?.Invoke();
+            else
+            {
+                var t = button.GetComponent<Toggle>();
+                if(t)
+                {
+                    var ct = button.GetComponent<CToggle>();
+                    if(ct)
+                    {
+                        var cToggleGroup = Traverse.Create(ct).Field("_toggleGroup").GetValue<CToggleGroup>();
+                        if(cToggleGroup)
+                        {
+                            cToggleGroup.Set(ct.Key, !ct.isOn);
+                        }
+                        else
+                        {
+                            t.isOn = !t.isOn;
+                        }
+                    }
+                    else
+                    {
+                        t.isOn = !t.isOn;
+                        //t.OnSubmit(null);
+                    }
+                }
+            }
         }
         public static void CheckMoveKey()
         {
@@ -649,11 +682,11 @@ namespace ArrowKey
             //MyUtils.MyLog($"按了 move");
         }
 
-        public static Button IsObjFindBtn(Transform transform)
+        public static Selectable IsObjFindBtn(Transform transform)
         {
             if (!CheckObjShow(transform.gameObject))
                 return null;
-            var btn = transform.GetComponent<Button>();
+            var btn = transform.GetComponent<Selectable>();
             if (CheckButton(btn))
             {
                 return btn;
@@ -663,7 +696,7 @@ namespace ArrowKey
         /// <summary>
         /// 只在父级下查找按钮
         /// </summary>
-        public static Button FindBtnNext(Button button)
+        public static Selectable FindBtnNext(Selectable button)
         {
             var index = button.transform.GetSiblingIndex();
             var parent = button.transform.parent;
@@ -673,7 +706,7 @@ namespace ArrowKey
             }
             return null;
         }
-        public static Button FindBtnLast(Button button)
+        public static Selectable FindBtnLast(Selectable button)
         {
             var index = button.transform.GetSiblingIndex();
             var parent = button.transform.parent;
@@ -683,7 +716,7 @@ namespace ArrowKey
             }
             return null;
         }
-        public static Button FindBtnUp(Button button)
+        public static Selectable FindBtnUp(Selectable button)
         {
             var index = button.transform.GetSiblingIndex();
             var parent = button.transform.parent;
@@ -697,7 +730,7 @@ namespace ArrowKey
             }
             return null;
         }
-        public static Button FindBtnDown(Button button)
+        public static Selectable FindBtnDown(Selectable button)
         {
             if (FindButtonFirst(button.transform, out var button1, out var isSelf, out var index1, checkSelf: false))
             {
@@ -706,14 +739,14 @@ namespace ArrowKey
             return null;
         }
 
-        public static Button FindBtnJumpNext(Button button)
+        public static Selectable FindBtnJumpNext(Selectable button)
         {
             var parent = button.transform.parent; // 不判断父节点
             MyUtils.MyLog($"FindBtnJumpNext 跳过{parent.name}  从 {parent.parent.name}查找");
             if (parent == null) return null;
             return JumpNextUp(parent);
         }
-        public static Button JumpNextUp(Transform transform)
+        public static Selectable JumpNextUp(Transform transform)
         {
             if (!transform) return null;
             if (transform.GetComponent<UIBase>()) { MyUtils.MyLog("JumpNextUp 已到ui节点，结束"); return null; }
@@ -728,14 +761,14 @@ namespace ArrowKey
             return JumpNextUp(parent);
         }
 
-        public static Button FindBtnJumpLast(Button button)
+        public static Selectable FindBtnJumpLast(Selectable button)
         {
             var parent = button.transform.parent; // 不判断父节点
             if (parent == null) return null;
             MyUtils.MyLog($"FindBtnJumpLast 跳过{parent.name} 从 {parent.parent.name}查找");
             return JumpLastUp(parent);
         }
-        public static Button JumpLastUp(Transform transform)
+        public static Selectable JumpLastUp(Transform transform)
         {
             if (!transform) return null;
             if (transform.GetComponent<UIBase>()) { MyUtils.MyLog("JumpLastUp 已到ui节点，结束"); return null; }
