@@ -26,6 +26,7 @@ using TMPro;
 using UICommon.Character;
 using UICommon.Character.Avatar;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.UI;
 using static FrameWork.AspectRatio.PlatformSpecific.Win32AspectRatioLock;
 using static GameData.Domains.Item.ItemOperationType;
@@ -410,7 +411,7 @@ namespace ArrowKey
             return false;
         }
         public static bool FindButtonFirst(Transform transform, out Button button, out bool isSelf, out int index, 
-            bool checkSelf=true, int startIndex=0, int endIndex = -1)
+            bool checkSelf=true, int startIndex=0, int endIndex = -1, bool loop = false)
         {
             button = default;
             isSelf = false;
@@ -429,11 +430,12 @@ namespace ArrowKey
                 }
             }
             if (endIndex == -1) endIndex = transform.childCount;
+            if (loop && startIndex >= transform.childCount) startIndex = 0;
 
             MyUtils.MyLog($"FindButtonFirst {transform.name} 有{transform.childCount}个， 查找范围[{startIndex}, {endIndex})");
             for (int i = startIndex; i < endIndex; i++)
             {
-                if (FindButtonFirst(transform.GetChild(i), out button, out var child, out var childIndex, checkSelf=true))
+                if (FindButtonFirst(transform.GetChild(i), out button, out var child, out var childIndex, checkSelf=true, loop:loop))
                 {
                     isSelf = false;
                     index = i;
@@ -443,18 +445,19 @@ namespace ArrowKey
             return false;
         }
         public static bool FindButtonLast(Transform transform, out Button button, out bool isSelf, out int index,
-            bool checkSelf = true, int rStartIndex = -2, int rEndIndex = 0)
+            bool checkSelf = true, int rStartIndex = -2, int rEndIndex = 0, bool loop=false)
         {
             button = default;
             isSelf = false;
             index = -1;
+            if(loop && rStartIndex == -1) rStartIndex = transform.childCount - 1;
             if (rStartIndex == -1) return false;
             if(!CheckObjShow(transform.gameObject)) return false;
             if(rStartIndex == -2) rStartIndex = transform.childCount - 1;
             MyUtils.MyLog($"FindButtonLast {transform.name} 有{transform.childCount}个， 查找范围[{rEndIndex}, {rStartIndex})");
             for (int i = rStartIndex; i >= rEndIndex; i--)
             {
-                if(FindButtonLast(transform.GetChild(i), out button, out var child, out var childIndex, checkSelf=true))
+                if(FindButtonLast(transform.GetChild(i), out button, out var child, out var childIndex, checkSelf=true, loop: loop))
                 {
                     isSelf = false;
                     index = i;
@@ -504,6 +507,14 @@ namespace ArrowKey
         {
             return obj.activeInHierarchy && CheckTransformScale(obj.transform);
         }
+        /// <summary>
+        /// 有些界面是通过直接y值设置到9000来“隐藏”的
+        /// </summary>
+        public static bool CheckTooHeight(Transform transform)
+        {
+            return transform.position.y > 5000; // 判断个5000应该够了
+        }
+
         public static bool CheckTransformScale(Transform transform)
         {
             if (transform == topUI.transform) return true; // canvas 0.0069f 特殊处理
@@ -540,7 +551,26 @@ namespace ArrowKey
             }
             TipsParent(button.transform);
             MyUtils.MyLog($"moveto {button.name}");
+            TryScrollTo(button);
         }
+        /// <summary>
+        /// 判断按钮是否在 滚动列表里，如果是的话调用 
+        /// </summary>
+        public static void TryScrollTo(Button btn)
+        {
+            if(curButton.GetComponent<Refers>())
+            {
+                var p = btn.transform.parent?.parent?.parent;
+                if(p && p.GetComponent<InfinityScroll>())
+                {
+                    var indexTo = Math.Max(0, int.Parse(btn.name) - 1);
+                    p.GetComponent<InfinityScroll>().ScrollTo(indexTo);
+                }
+            }
+        }
+
+
+
         public static Image GetButtonBg(Button button)
         {
             if (button.GetComponent<Image>())
