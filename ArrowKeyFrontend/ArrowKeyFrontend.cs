@@ -172,7 +172,6 @@ namespace ArrowKey
             KeyCode.KeypadEnter, 
         };
 
-        public static KeyCode runKey = KeyCode.Return;
 
         public static bool isEnter = false;
         public static bool haveInit = false; // 开关
@@ -207,15 +206,15 @@ namespace ArrowKey
         }
         #region 处理ui变化时，退出导航
         [HarmonyPrefix, HarmonyPatch(typeof(UIManager), "ShowUI")]
-        public static void ShowUI(UIManager __instance) { if (isEnter) { ToExit(); } }
+        public static void ShowUI(UIManager __instance) { if (isEnter) { ToExit(); } else { RelButton(); } }
         [HarmonyPrefix, HarmonyPatch(typeof(UIManager), "HideUI")]
-        public static void HideUI(UIManager __instance) { if(isEnter) { ToExit(); } }
+        public static void HideUI(UIManager __instance) { if(isEnter) { ToExit(); } else { RelButton(); } }
         [HarmonyPrefix, HarmonyPatch(typeof(UIManager), "ChangeToUI")]
-        public static void ChangeToUI(UIManager __instance) { if (isEnter) { ToExit(); } }
+        public static void ChangeToUI(UIManager __instance) { if (isEnter) { ToExit(); } else { RelButton(); } }
         [HarmonyPrefix, HarmonyPatch(typeof(UIManager), "StackToUI")]
-        public static void StackToUI(UIManager __instance) { if (isEnter) { ToExit(); } }
+        public static void StackToUI(UIManager __instance) { if (isEnter) { ToExit(); } else { RelButton(); } }
         [HarmonyPrefix, HarmonyPatch(typeof(UIManager), "StackBack")]
-        public static void StackBack(UIManager __instance) { if (isEnter) { ToExit(); } }
+        public static void StackBack(UIManager __instance) { if (isEnter) { ToExit(); } else { RelButton(); } }
         #endregion
 
         [HarmonyPostfix, HarmonyPatch(typeof(Game), "Update")]
@@ -238,7 +237,7 @@ namespace ArrowKey
                 }
                 else
                 {
-                    ToExit();
+                    ToExit(rel:false);
                 }
             }
         }
@@ -251,27 +250,36 @@ namespace ArrowKey
         public static void OnEnter()
         {
             Init();
-            TryFindButton();
+            TryReGetButton();
+            if(curButton == null)
+            {
+                TryFindButton();
+            }
+            if(curButton == null)
+            {
+                ToExit();
+            }
         }
-        public static void ToExit()
+        public static void ToExit(bool rel = true)
         {
             isEnter = false;
             MyUtils.MyLog($"退出导航模式");
-            OnExit();
+            OnExit(rel);
         }
-        public static void OnExit()
+        public static void OnExit(bool rel=true)
         {
-            RelButton();
+            MyUtils.MyLog($"OnExit {rel}");
+            RelButton(rel);
             CycleTipsText();
         }
-        public static void RelButton()
+        public static void RelButton(bool rel = true)
         {
             if (curButtonBg)
             {
                 curButtonBg.color = btnColor;
                 curButtonBg = null;
             }
-            if (curButton)
+            if (rel && curButton)
             {
                 curButton = null;
             }
@@ -341,6 +349,37 @@ namespace ArrowKey
             rect.localPosition = Vector2.zero;
             rect.localScale = Vector2.one;
             //MyUtils.MyLog($"TipsParent {rect.anchoredPosition}  {rect.localPosition} {rect.localScale}");
+        }
+        public static void TryReGetButton()
+        {
+            if(curButton != null)
+            {
+                if(CheckButton(curButton))
+                {
+                    MyUtils.MyLog($"{curButton}可用，恢复原位");
+                    MoveTo(curButton);
+                }
+                else
+                {
+                    MyUtils.MyLog($"{curButton}不可用，尝试寻找替代");
+                    var parent = curButton.transform.parent;
+                    var index = curButton.transform.GetSiblingIndex();
+                    if (FindButtonLast(parent, out var button1, out var _, out var _, checkSelf: false, rStartIndex: index - 1, loop: true))
+                    {
+                        MyUtils.MyLog($"{curButton}寻找到替代{button1}");
+                        MoveTo(button1);
+                    }
+                    else
+                    {
+                        MyUtils.MyLog($"{curButton}无替代");
+                        curButton = null;
+                    }
+                }
+            }
+            else
+            {
+                 MyUtils.MyLog($"无旧按钮");
+            }
         }
         public static void TryFindButton()
         {
@@ -416,7 +455,10 @@ namespace ArrowKey
             button = default;
             isSelf = false;
             index = -1;
-            if (!CheckObjShow(transform.gameObject)) return false;
+            if (!CheckObjShow(transform.gameObject)) {
+                MyUtils.MyLog($"FindButtonFirst {transform.name} 不显示，跳过");
+                return false; 
+            }
             if(checkSelf)
             {
                 var btn = transform.GetComponent<Selectable>();
@@ -478,6 +520,7 @@ namespace ArrowKey
             }
             return false;
         }
+        
         /// <summary>
         /// 找到同级的第一个按钮
         /// </summary>
@@ -505,14 +548,23 @@ namespace ArrowKey
         }
         public static bool CheckObjShow(GameObject obj)
         {
-            return obj.activeInHierarchy && CheckTransformScale(obj.transform) && CheckTooHeight(obj.transform);
+            var cond1 = obj.activeInHierarchy;
+            var cond2 = CheckTransformScale(obj.transform);
+            var cond3 = CheckTooHeight(obj.transform);
+            var r = cond1 && cond2 && cond3;
+            if (!r)
+                MyUtils.MyLog($"CheckObjShow {obj.name} {cond1} {cond2} {cond3}");
+            return r;
+            //return obj.activeInHierarchy && CheckTransformScale(obj.transform) && CheckTooHeight(obj.transform);
         }
         /// <summary>
         /// 有些界面是通过直接y值设置到9000来“隐藏”的
         /// </summary>
         public static bool CheckTooHeight(Transform transform)
         {
-            return transform.localPosition.y <= 5000; // 判断个5000应该够了
+            // 只对界面进行y值判断
+            if (transform.GetComponent<UIBase>()) return transform.localPosition.y <= 5000; // 判断个5000应该够了
+            else return true;
         }
 
         public static bool CheckTransformScale(Transform transform)
@@ -614,7 +666,7 @@ namespace ArrowKey
         public static void ClickButton()
         {
             var button = curButton;
-            ToExit();
+            ToExit(rel:false);
             var btn = button.GetComponent<Button>();
             if (btn != null) btn.onClick?.Invoke();
             else
@@ -657,6 +709,17 @@ namespace ArrowKey
                     MoveJumpLast();
                 }
             }
+            else if (Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift))
+            {
+                if (Input.GetKeyDown(KeyCode.DownArrow) || Input.GetKeyDown(KeyCode.RightArrow))
+                {
+                    MoveUiNext();
+                }
+                else if (Input.GetKeyDown(KeyCode.UpArrow) || Input.GetKeyDown(KeyCode.LeftArrow))
+                {
+                    MoveUiLast();
+                }
+            }
             else if(Input.GetKey(KeyCode.LeftAlt) || Input.GetKey(KeyCode.RightAlt))
             {
                 if (Input.GetKeyDown(KeyCode.DownArrow) || Input.GetKeyDown(KeyCode.RightArrow))
@@ -696,7 +759,7 @@ namespace ArrowKey
         /// <summary>
         /// 只在父级下查找按钮
         /// </summary>
-        public static Selectable FindBtnNext(Selectable button)
+        public static Selectable FindBtnNext(Transform button)
         {
             var index = button.transform.GetSiblingIndex();
             var parent = button.transform.parent;
@@ -706,7 +769,7 @@ namespace ArrowKey
             }
             return null;
         }
-        public static Selectable FindBtnLast(Selectable button)
+        public static Selectable FindBtnLast(Transform button)
         {
             var index = button.transform.GetSiblingIndex();
             var parent = button.transform.parent;
@@ -716,7 +779,7 @@ namespace ArrowKey
             }
             return null;
         }
-        public static Selectable FindBtnUp(Selectable button)
+        public static Selectable FindBtnUp(Transform button)
         {
             var index = button.transform.GetSiblingIndex();
             var parent = button.transform.parent;
@@ -730,7 +793,7 @@ namespace ArrowKey
             }
             return null;
         }
-        public static Selectable FindBtnDown(Selectable button)
+        public static Selectable FindBtnDown(Transform button)
         {
             if (FindButtonFirst(button.transform, out var button1, out var isSelf, out var index1, checkSelf: false))
             {
@@ -739,7 +802,7 @@ namespace ArrowKey
             return null;
         }
 
-        public static Selectable FindBtnJumpNext(Selectable button)
+        public static Selectable FindBtnJumpNext(Transform button)
         {
             var parent = button.transform.parent; // 不判断父节点
             MyUtils.MyLog($"FindBtnJumpNext 跳过{parent.name}  从 {parent.parent.name}查找");
@@ -749,6 +812,7 @@ namespace ArrowKey
         public static Selectable JumpNextUp(Transform transform)
         {
             if (!transform) return null;
+            if(transform == topUI.transform) { MyUtils.MyLog("JumpNextUp 已到 topui 节点，结束"); return null; }
             if (transform.GetComponent<UIBase>()) { MyUtils.MyLog("JumpNextUp 已到ui节点，结束"); return null; }
             var index = transform.GetSiblingIndex();
             var parent = transform.parent;
@@ -761,7 +825,7 @@ namespace ArrowKey
             return JumpNextUp(parent);
         }
 
-        public static Selectable FindBtnJumpLast(Selectable button)
+        public static Selectable FindBtnJumpLast(Transform button)
         {
             var parent = button.transform.parent; // 不判断父节点
             if (parent == null) return null;
@@ -771,6 +835,7 @@ namespace ArrowKey
         public static Selectable JumpLastUp(Transform transform)
         {
             if (!transform) return null;
+            if(transform == topUI.transform) { MyUtils.MyLog("JumpLastUp 已到 topui 节点，结束"); return null; }
             if (transform.GetComponent<UIBase>()) { MyUtils.MyLog("JumpLastUp 已到ui节点，结束"); return null; }
             var index = transform.GetSiblingIndex();
             var parent = transform.parent;
@@ -782,14 +847,44 @@ namespace ArrowKey
             }
             return JumpLastUp(parent);
         }
+
+        public static Selectable FindBtnNextUI(Transform button)
+        {
+            Selectable button1 = null;
+            var oldUi = button.GetComponentInParent<UIBase>();
+            if(oldUi)
+            {
+                button1 = FindBtnNext(oldUi.transform);
+                if(!button1)
+                {
+                    button1 = FindBtnJumpNext(oldUi.transform);
+                }
+            }
+            return button1;
+        }
+        public static Selectable FindBtnLastUI(Transform button)
+        {
+            Selectable button1 = null;
+            var oldUi = button.GetComponentInParent<UIBase>();
+            if (oldUi)
+            {
+                button1 = FindBtnLast(oldUi.transform);
+                if (!button1)
+                {
+                    button1 = FindBtnJumpLast(oldUi.transform);
+                }
+            }
+            return button1;
+        }
+
         public static void MoveNext()
         {
-            var btn = FindBtnNext(curButton);
+            var btn = FindBtnNext(curButton.transform);
             if (btn) { MoveTo(btn); } else { MyUtils.MyLog($"跳转 Next 无效"); }
         }
         public static void MoveLast()
         {
-            var btn = FindBtnLast(curButton);
+            var btn = FindBtnLast(curButton.transform);
             if (btn) { MoveTo(btn); } else { MyUtils.MyLog($"跳转 Last 无效"); }
         }
         /// <summary>
@@ -797,24 +892,34 @@ namespace ArrowKey
         /// </summary>
         public static void MoveJumpNext()
         {
-            var btn = FindBtnJumpNext(curButton);
+            var btn = FindBtnJumpNext(curButton.transform);
             if (btn) { MoveTo(btn); } else { MyUtils.MyLog($"跳转 JumpNext 无效"); }
         }
         public static void MoveJumpLast()
         {
-            var btn = FindBtnJumpLast(curButton);
+            var btn = FindBtnJumpLast(curButton.transform);
             if (btn) { MoveTo(btn); } else { MyUtils.MyLog($"跳转 JumpLast 无效"); }
         }
 
         public static void MoveUp()
         {
-            var btn = FindBtnUp(curButton);
+            var btn = FindBtnUp(curButton.transform);
             if (btn) { MoveTo(btn); } else { MyUtils.MyLog($"跳转 Up 无效"); }
         }
         public static void MoveDown()
         {
-            var btn = FindBtnDown(curButton);
+            var btn = FindBtnDown(curButton.transform);
             if (btn) { MoveTo(btn); } else { MyUtils.MyLog($"跳转 Down 无效"); }
+        }
+        public static void MoveUiNext()
+        {
+            var btn = FindBtnNextUI(curButton.transform);
+            if (btn) { MoveTo(btn); } else { MyUtils.MyLog($"跳转 UiNext 无效"); }
+        }
+        public static void MoveUiLast()
+        {
+            var btn = FindBtnLastUI(curButton.transform);
+            if (btn) { MoveTo(btn); } else { MyUtils.MyLog($"跳转 UiLast 无效"); }
         }
     }
 }
