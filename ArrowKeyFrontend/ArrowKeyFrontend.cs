@@ -133,7 +133,7 @@ namespace ArrowKey
             }
         }
 
-        public static bool isAnyKey(List<KeyCode> keyCodes, out KeyCode keyCode)
+        public static bool isAnyKeyDown(List<KeyCode> keyCodes, out KeyCode keyCode)
         {
             for (int i = 0; i < keyCodes.Count; i++)
             {
@@ -146,6 +146,30 @@ namespace ArrowKey
             keyCode = KeyCode.None;
             return false;
         }
+        public static bool isAnyKey(List<KeyCode> keyCodes, out KeyCode keyCode)
+        {
+            for (int i = 0; i < keyCodes.Count; i++)
+            {
+                if (Input.GetKey(keyCodes[i]))
+                {
+                    keyCode = keyCodes[i];
+                    return true;
+                }
+            }
+            keyCode = KeyCode.None;
+            return false;
+        }
+
+        public static bool NoFuncKey()
+        {
+            return !isAnyKey(funcKey, out _);
+        }
+
+        public static List<KeyCode> funcKey = new List<KeyCode>()
+        {
+            KeyCode.LeftControl, KeyCode.RightControl, KeyCode.LeftAlt, KeyCode.RightAlt,
+            KeyCode.LeftShift, KeyCode.RightShift,
+        };
 
         public static Color Color16A(uint hex)
         {
@@ -175,7 +199,7 @@ namespace ArrowKey
         public static List<KeyCode> clickKey = new List<KeyCode>()
         {
             KeyCode.Return, KeyCode.KeypadEnter,
-            KeyCode.JoystickButton0,//a
+            KeyCode.JoystickButton7,// 右中键
         };
 
 
@@ -263,7 +287,7 @@ namespace ArrowKey
 
         public static void CheckEnter()
         {
-            if (MyUtils.isAnyKey(enterKeys, out _))
+            if (MyUtils.NoFuncKey() && MyUtils.isAnyKeyDown(enterKeys, out _))
             {
                 if (!isEnter)
                 {
@@ -691,7 +715,7 @@ namespace ArrowKey
         public static void CheckClickKey()
         {
             if (!isEnter) return;
-            if (MyUtils.isAnyKey(clickKey, out var keyCode) && CheckButton(curButton))
+            if (MyUtils.isAnyKeyDown(clickKey, out var keyCode) && CheckButton(curButton))
             {
                 MyUtils.MyLog($"按了 {keyCode}");
                 ClickButton();
@@ -741,9 +765,9 @@ namespace ArrowKey
             var toJump = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl)
                 || Input.GetKey(KeyCode.JoystickButton6);
             var toJumpUI = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift)
-                || Input.GetKey(KeyCode.JoystickButton7);
+                || Input.GetKey(KeyCode.JoystickButton8);
             var toUp = Input.GetKey(KeyCode.LeftAlt) || Input.GetKey(KeyCode.RightAlt)
-                || Input.GetKey(KeyCode.JoystickButton5);
+                || Input.GetKey(KeyCode.JoystickButton9);
             if (toJump)
             {
                 if (toNext)

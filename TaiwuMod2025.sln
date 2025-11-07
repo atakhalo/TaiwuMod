@@ -19,6 +19,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "QuickKeyFrontend", "QuickKe
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ArrowKeyFrontend", "ArrowKeyFrontend\ArrowKeyFrontend.csproj", "{1EB1269B-7317-973A-C71D-BD0EFA874621}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MouseKeyFrontend", "MouseKeyFrontend\MouseKeyFrontend.csproj", "{F4F1C4CF-FBBA-AABD-BDEF-6254F7897AE6}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -57,6 +59,10 @@ Global
 		{1EB1269B-7317-973A-C71D-BD0EFA874621}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{1EB1269B-7317-973A-C71D-BD0EFA874621}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{1EB1269B-7317-973A-C71D-BD0EFA874621}.Release|Any CPU.Build.0 = Release|Any CPU
+		{F4F1C4CF-FBBA-AABD-BDEF-6254F7897AE6}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F4F1C4CF-FBBA-AABD-BDEF-6254F7897AE6}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F4F1C4CF-FBBA-AABD-BDEF-6254F7897AE6}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F4F1C4CF-FBBA-AABD-BDEF-6254F7897AE6}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
