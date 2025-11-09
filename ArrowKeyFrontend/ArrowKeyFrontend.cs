@@ -28,8 +28,6 @@ using UICommon.Character.Avatar;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
-using static FrameWork.AspectRatio.PlatformSpecific.Win32AspectRatioLock;
-using static GameData.Domains.Item.ItemOperationType;
 
 
 namespace ArrowKey
@@ -205,7 +203,7 @@ namespace ArrowKey
         };
         public static List<KeyCode> clickKeyJoy = new List<KeyCode>()
         {
-            KeyCode.End,
+            KeyCode.JoystickButton7,
         };
 
         public static bool isEnter = false;
@@ -640,7 +638,7 @@ namespace ArrowKey
             }
             TipsParent(button.transform);
             MyUtils.MyLog($"moveto {button.name}");
-            TryScrollTo(button);
+            //TryScrollTo(button);
         }
         /// <summary>
         /// 判断按钮是否在 滚动列表里，如果是的话调用 
