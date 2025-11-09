@@ -15,7 +15,7 @@ using HarmonyLib.Tools;
 using System;
 using System.Collections;
 using System.Collections.Generic;
-
+using System.IO;
 using System.Reflection;
 using System.Text.RegularExpressions;
 using TaiwuModdingLib.Core.Plugin;
@@ -90,9 +90,10 @@ namespace Minutiae
 
         public static bool showCharId = false; // 开关 是否显示为charid
         public static Dictionary<int, string> idRes = new Dictionary<int, string>();
-        //public static Dictionary<string, string> npcRes = new Dictionary<string, string>();
+        public static Dictionary<string, string> npcRes = new Dictionary<string, string>();
 
-        //public static Dictionary<int, CharacterDisplayData> idData = new Dictionary<int, CharacterDisplayData>();
+        public static bool toCreateFile = false;
+        public static bool toReadFile = false;
 
         public static void MyLog(string log)
         {
@@ -121,35 +122,83 @@ namespace Minutiae
             ModManager.GetSetting(ModIdStr, "npcNameCustom", ref npcNameCustom);
             //MyLog($"{npcFace}, {npcNameIdx}, {customNpc}, {npcNameCustom}");
 
-            string npcNameStr = "";
-            int npcId = -1;
-            //string npcRes = "";
-            int npcResIdx = 0;
-            ModManager.GetSetting(ModIdStr, "npc1", ref npcNameStr);
-            int.TryParse(npcNameStr, out npcId);
-            ModManager.GetSetting(ModIdStr, "npcRes1", ref npcResIdx);
-            if (npcId != -1 && npcName.Length > npcResIdx) idRes[npcId] = npcName[npcResIdx];
-            ModManager.GetSetting(ModIdStr, "npc2", ref npcNameStr);
-            int.TryParse(npcNameStr, out npcId);
-            ModManager.GetSetting(ModIdStr, "npcRes2", ref npcResIdx);
-            if (npcId != -1 && npcName.Length > npcResIdx) idRes[npcId] = npcName[npcResIdx];
-            ModManager.GetSetting(ModIdStr, "npc3", ref npcNameStr);
-            int.TryParse(npcNameStr, out npcId);
-            ModManager.GetSetting(ModIdStr, "npcRes3", ref npcResIdx);
-            if (npcId != -1 && npcName.Length > npcResIdx) idRes[npcId] = npcName[npcResIdx];
-
             //string npcNameStr = "";
+            //int npcId = -1;
             ////string npcRes = "";
             //int npcResIdx = 0;
             //ModManager.GetSetting(ModIdStr, "npc1", ref npcNameStr);
+            //int.TryParse(npcNameStr, out npcId);
             //ModManager.GetSetting(ModIdStr, "npcRes1", ref npcResIdx);
-            //if(!string.IsNullOrEmpty(npcNameStr) && npcName.Length > npcResIdx) NpcFaceFrontendPlugin.npcRes[npcNameStr] = npcName[npcResIdx];
+            //if (npcId != -1 && npcName.Length > npcResIdx) idRes[npcId] = npcName[npcResIdx];
             //ModManager.GetSetting(ModIdStr, "npc2", ref npcNameStr);
+            //int.TryParse(npcNameStr, out npcId);
             //ModManager.GetSetting(ModIdStr, "npcRes2", ref npcResIdx);
-            //if(!string.IsNullOrEmpty(npcNameStr) && npcName.Length > npcResIdx) NpcFaceFrontendPlugin.npcRes[npcNameStr] = npcName[npcResIdx];
+            //if (npcId != -1 && npcName.Length > npcResIdx) idRes[npcId] = npcName[npcResIdx];
             //ModManager.GetSetting(ModIdStr, "npc3", ref npcNameStr);
+            //int.TryParse(npcNameStr, out npcId);
             //ModManager.GetSetting(ModIdStr, "npcRes3", ref npcResIdx);
-            //if(!string.IsNullOrEmpty(npcNameStr) && npcName.Length > npcResIdx) NpcFaceFrontendPlugin.npcRes[npcNameStr] = npcName[npcResIdx];
+            //if (npcId != -1 && npcName.Length > npcResIdx) idRes[npcId] = npcName[npcResIdx];
+
+            string npcNameStr = "";
+            int npcResIdx = 0;
+            npcRes.Clear();
+            ModManager.GetSetting(ModIdStr, "npc1", ref npcNameStr);
+            ModManager.GetSetting(ModIdStr, "npcRes1", ref npcResIdx);
+            if (!string.IsNullOrEmpty(npcNameStr) && npcName.Length > npcResIdx) npcRes[npcNameStr] = npcName[npcResIdx];
+            ModManager.GetSetting(ModIdStr, "npc2", ref npcNameStr);
+            ModManager.GetSetting(ModIdStr, "npcRes2", ref npcResIdx);
+            if (!string.IsNullOrEmpty(npcNameStr) && npcName.Length > npcResIdx) npcRes[npcNameStr] = npcName[npcResIdx];
+            ModManager.GetSetting(ModIdStr, "npc3", ref npcNameStr);
+            ModManager.GetSetting(ModIdStr, "npcRes3", ref npcResIdx);
+            if (!string.IsNullOrEmpty(npcNameStr) && npcName.Length > npcResIdx) npcRes[npcNameStr] = npcName[npcResIdx];
+
+            ModManager.GetSetting(ModIdStr, "toCreateFile", ref toCreateFile);
+            TryCreateFile();
+            ModManager.GetSetting(ModIdStr, "toReadFile", ref toReadFile);
+            TryReadFile();
+        }
+
+        public static void TryCreateFile()
+        {
+            if(toCreateFile)
+            {
+                var dirPath = ModManager.GetModRootFolder();
+                var filePath = Path.Combine(dirPath, "太吾迎娇(npc立绘)", "npcFace.txt");
+                if (!File.Exists(filePath)) {
+                    var str1 = $"// 说明:1. 首行跳过； 2. 格式:名字,资源名;（即英文逗号分隔，英文分号结尾）3. 资源名在mod的下载目录下找 C:\\Program Files (x86)\\Steam\\steamapps\\workshop\\content\\838350\\3593734737\\npcName.txt\n";
+                    var str2 = $"我是示例,NpcFace_yingjiao;\n";
+                    var s = str1 + str2;
+                    File.WriteAllText(filePath, s, System.Text.Encoding.UTF8);
+                    //MyLog($"创建 {filePath} npcFace.txt");
+                }
+            }
+        }
+
+        public static void TryReadFile()
+        {
+            if (toReadFile)
+            {
+                var dirPath = ModManager.GetModRootFolder();
+                var filePath = Path.Combine(dirPath, "太吾迎娇(npc立绘)", "npcFace.txt");
+                if (File.Exists(filePath))
+                {
+                    var s = File.ReadAllLines(filePath, System.Text.Encoding.UTF8);
+                    for (int i = 0; i < s.Length; i++)
+                    {
+                        if (i == 0) continue;
+                        var line = s[i];
+                        if(string.IsNullOrEmpty(line)) continue;
+                        var r = line.Split(',');
+                        if (r.Length > 1)
+                        {
+                            var n = r[0].Trim();
+                            var res = r[1].Split(';')[0].Trim();
+                            npcRes[n] = res;
+                            //MyLog($"读取 npcFace.txt {n} {res}");
+                        }
+                    }
+                }
+            }
         }
 
         public static void TrySetNpcFace(Avatar avatar, CharacterAvatar? instance, int charId)
@@ -176,43 +225,34 @@ namespace Minutiae
             }
         }
 
+        /// <summary>
+        /// 根据 mousetips 找id
+        /// </summary>
         public static void TrySetNpcFace(Avatar avatar, CharacterAvatar? instance, AvatarRelatedData relatedData)
         {
-            MyLog("TrySetNpcFace");
+            //MyLog("TrySetNpcFace");
             if(avatar == null) return;
             var curId = TryFindId(avatar.transform, maxUp: 3);
             if(curId != -1)
             {
                 var taiwuCharId = SingletonObject.getInstance<BasicGameData>().TaiwuCharId;
-                MyLog($"relater 找到id {curId}");
                 if(curId == taiwuCharId)
                 {
-                    MyLog($"relater 找到太吾id");
                     resLoad(avatar, instance, isTaiwu: true);
                 }
                 if (idRes.ContainsKey(curId))
                 {
-                    MyLog($"idRes 包含id {curId}");
                     resLoad(avatar, instance, isTaiwu: false, idRes[curId]);
                 }
                 else
                 {
-                    MyLog($"idRes 不包含id {curId}");
                 }
             }
-
-            //var curName = TryFindName(avatar.transform, maxUp:3);
-            //if(curName != "")
-            //{
-            //    MyLog($"找到名字 {curName}");
-            //    if (npcRes.ContainsKey(curName))
-            //        resLoad(avatar, instance, isTaiwu: false, npcRes[curName]);
-            //}
         }
 
         public static int TryFindId(Transform transform, int maxUp)
         {
-            MyLog($"当前查找{transform}, {maxUp}");
+            //MyLog($"当前查找{transform}, {maxUp}");
             var s = TryGetNpcId(transform);
             if (s == -1)
             {
@@ -234,13 +274,53 @@ namespace Minutiae
                 r.RuntimeParam.Get("charId", out charId);
                 if (charId == -1) r.RuntimeParam.Get("CharId", out charId);
                 if (charId == -1) r.RuntimeParam.Get("NpcCharId", out charId);
-                MyLog($"找到 MouseTipDisplayer {charId}");
+                //MyLog($"找到 MouseTipDisplayer {charId}");
             }
             return charId;
         }
 
+        public static void TrySetNpcFaceByName(Avatar avatar, CharacterAvatar? instance, AvatarRelatedData relatedData)
+        {
+            //MyLog($"TrySetNpcFaceByName relatedData {avatar}");
+            if (avatar == null) return;
+            var curName = TryFindName(avatar.transform, maxUp: 3);
+            if (curName != "")
+            {
+                //MyLog($"TrySetNpcFaceByName 找到名字 {curName}");
+                var taiwuDisplayName = SingletonObject.getInstance<BasicGameData>().TaiwuDisplayName;
+                if(curName == taiwuDisplayName)
+                    resLoad(avatar, instance, isTaiwu: true);
+                else
+                {
+                    if (npcRes.ContainsKey(curName))
+                        resLoad(avatar, instance, isTaiwu: false, npcRes[curName]);
+                }
+            }
+        }
+
+        public static void TrySetNpcFaceByName(Avatar avatar, CharacterAvatar? instance, CharacterDisplayData displayData)
+        {
+            //MyLog($"TrySetNpcFaceByName displayData  {avatar}");
+            if (avatar == null) return;
+            string curName = NameCenter.GetMonasticTitleOrDisplayName(displayData, isTaiwu: false);
+            if (curName != "")
+            {
+                //MyLog($"TrySetNpcFaceByName 找到名字 {curName}");
+                if (npcRes.ContainsKey(curName))
+                    resLoad(avatar, instance, isTaiwu: false, npcRes[curName]);
+            }
+        }
+
         public static string TryFindName(Transform transform, int maxUp)
         {
+            if(transform.name.Contains("TaiwuChar")) // FillElementPost 调用过来的，会走到这里，ui_bottom下可以用这个判断
+            {
+                var taiwuDisplayName = SingletonObject.getInstance<BasicGameData>().TaiwuDisplayName;
+                return taiwuDisplayName;
+            }
+            //var ui = transform.GetComponentInParent<UIBase>();
+            //if (ui is UI_CharacterMenuInfo)
+            //    MyLog("$正在查找 UI_CharacterMenuInfo");
             var s = TryGetNpcName(transform);
             if (s == null || s == "")
             {
@@ -254,26 +334,36 @@ namespace Minutiae
 
         public static string TryGetNpcName(Transform transform)
         {
-            var r = transform.GetComponent<Refers>();
             TextMeshProUGUI t = null;
-            if (r != null)
+            var ts = transform.GetComponentsInChildren<TextMeshProUGUI>();
+            foreach(var t1 in ts)
             {
-                MyLog($"找到refer {r} {r.Names.Count}");
-                r.CTryGet<TextMeshProUGUI>("Name", out t);
-                if(t == null) r.CTryGet<TextMeshProUGUI>("CharacterName", out t);
-            }
-            else
-            {
-                if (t == null)
+                if (t1.name.Contains("name") || t1.name.Contains("Name")
+                    && t1.name != "OrganizationName" && t1.name != "SkillName"
+                    && !t1.text.Contains("ID:") && t1.text!="剩余潜力")  // mod添加的控件
                 {
-                    var t1 = transform.GetComponentInChildren<TextMeshProUGUI>();
-                    if (t1 && (t1.name.Contains("name") || t1.name.Contains("Name")))
-                        t = t1;
+                    t = t1;
+                    break;
                 }
             }
             if (t)
             {
-                MyLog($"找到 tmp {t} {t.text}");
+                //MyLog($"找到 {transform}下的tmp  {t} {t.text}");
+                return t.text;
+            }
+            //MyLog($" {transform} 无 tmp ");
+            var r = transform.GetComponent<Refers>();
+            if (r is Avatar) r = null;
+            if (r != null)
+            {
+                //MyLog($"找到refer {r} {r.Names.Count}");
+                r.CTryGet<TextMeshProUGUI>("Name", out t);
+                if(t == null) r.CTryGet<TextMeshProUGUI>("CharacterName", out t);
+                if(t == null) r.CTryGet<TextMeshProUGUI>("CharName", out t);
+            }
+            if (t)
+            {
+                //MyLog($"找到 refer 下的tmp {t} {t.text}");
                 return t.text;
             }
             return "";
@@ -291,7 +381,8 @@ namespace Minutiae
                 resLoad(__instance, null, isTaiwu:true);
                 return;
             }
-            TrySetNpcFace(__instance, null, displayData);
+            TrySetNpcFaceByName(__instance, null, displayData);
+            //TrySetNpcFace(__instance, null, displayData);
         }
 
         // 关系界面 主体
@@ -299,55 +390,21 @@ namespace Minutiae
         public static void OnRefreshCharRelated(Avatar __instance, AvatarRelatedData relatedData)
         {
             if (!npcFace) return;
-            MyLog("OnRefreshCharRelated");
-            //var taiwuCharId = SingletonObject.getInstance<BasicGameData>().TaiwuCharId;
-            //if (UIElement.CharacterMenuRelationShip.Exist)
-            //{
-            //    var ui = UIElement.CharacterMenuRelationShip.UiBase as UI_CharacterMenuRelationShip;
-
-            //    var taiwuData = Traverse.Create(ui).Field("_taiwuCharacterDisplayData").GetValue<CharacterDisplayData>();
-            //    if (taiwuData != null)
-            //    {
-            //        if (taiwuData.AvatarRelatedData == relatedData)
-            //        {
-            //            resLoad(__instance, null, isTaiwu: true);
-            //            return;
-            //        }
-            //    }
-            //}
-
-            //CheckIdRelated(__instance, relatedData);
+            //MyLog("OnRefreshCharRelated");
             DelayCall(__instance, relatedData);
         }
 
         public static void DelayCall(Avatar avatar, AvatarRelatedData relatedData)
         {
-            Game.Instance.StartCoroutine(DelayCoroutine(TrySetNpcFace, 0, avatar, null, relatedData));
+            //Game.Instance.StartCoroutine(DelayCoroutine(TrySetNpcFace, 0, avatar, null, relatedData));
+            Game.Instance.StartCoroutine(DelayCoroutine(TrySetNpcFaceByName, 0, avatar, null, relatedData));
         }
+
         private static IEnumerator DelayCoroutine(Action<Avatar, CharacterAvatar, AvatarRelatedData> action, float delay, Avatar avatar, CharacterAvatar instance, AvatarRelatedData relatedData)
         {
             yield return new WaitForSeconds(delay);
             action?.Invoke(avatar, instance, relatedData);
         }
-
-
-        //// 关系界面
-        //[HarmonyPostfix, HarmonyPatch(typeof(Avatar), "Refresh", argumentTypes: new Type[2] { typeof(AvatarRelatedData), typeof(short) })]
-        //public static void OnRefreshCharRelatedChar(Avatar __instance, AvatarRelatedData relatedData, short characterTemplateId)
-        //{
-        //    if (!npcFace) return;
-        //    MyLog("OnRefreshCharRelatedChar");
-
-        //    var taiwuCharId = SingletonObject.getInstance<BasicGameData>().TaiwuCharId;
-        //    var extraData = SingletonObject.getInstance<CharacterMonitorModel>().GetCharacterAvatarExtraData(taiwuCharId);
-        //    if (extraData != null && extraData == __instance.AvatarExtraData)
-        //    {
-        //        resLoad(__instance, null, isTaiwu: true);
-        //        return;
-        //    }
-        //    CheckIdRelated(__instance, relatedData);
-        //    //TrySetNpcFace(__instance, null);
-        //}
 
         // 人物界面, 
         // 返回的时候，判断是否tips在请求，是的话 发起计算请求
@@ -355,7 +412,7 @@ namespace Minutiae
         public static void FillElementPost(CharacterAvatar __instance)
         {
             if (!npcFace) return;
-
+            //MyLog($"FillElementPost");
             if (__instance == null) return;
             var taiwuCharId = SingletonObject.getInstance<BasicGameData>().TaiwuCharId;
             if (__instance.CharacterId == taiwuCharId)
@@ -367,28 +424,30 @@ namespace Minutiae
             else
             {
                 var avatar = Traverse.Create(__instance).Field("_avatar").GetValue<Avatar>();
-                TrySetNpcFace(avatar, __instance, __instance.CharacterId);
+                //TrySetNpcFaceByName(avatar, null, relatedData:null);
+                DelayCall(avatar, null);
+
+                //TrySetNpcFace(avatar, __instance, __instance.CharacterId);
             }
         }
-        // tips界面
-        [HarmonyPostfix, HarmonyPatch(typeof(MouseTipCharacterOnMapBlock), "SetAvatar")]
-        public static void SetAvatar(MouseTipCharacterOnMapBlock __instance, CharacterDisplayDataForMapBlock data)
-        {
-            var taiwuCharId = SingletonObject.getInstance<BasicGameData>().TaiwuCharId;
-            Refers _mainPanel = Traverse.Create(__instance).Field("_mainPanel").GetValue<Refers>();
-            Avatar avatar = _mainPanel.CGet<Avatar>("Avatar"); 
-            if (data.CharacterId == taiwuCharId)
-            {
-                //resLoad(avatar, null, isTaiwu: true);
-            }
-            else
-            {
-                if (idRes.ContainsKey(data.CharacterId))
-                {
-                    resLoad(avatar, null, isTaiwu: false, idRes[data.CharacterId]);
-                }
-            }
-        }
+
+        //// tips界面
+        //[HarmonyPostfix, HarmonyPatch(typeof(MouseTipCharacterOnMapBlock), "SetAvatar")]
+        //public static void SetAvatar(MouseTipCharacterOnMapBlock __instance, CharacterDisplayDataForMapBlock data)
+        //{
+        //    if (!npcFace) return;
+        //    var taiwuCharId = SingletonObject.getInstance<BasicGameData>().TaiwuCharId;
+        //    Refers _mainPanel = Traverse.Create(__instance).Field("_mainPanel").GetValue<Refers>();
+        //    Avatar avatar = _mainPanel.CGet<Avatar>("Avatar");
+        //    if (data.CharacterId == taiwuCharId)
+        //    {
+        //        //resLoad(avatar, null, isTaiwu: true);
+        //    }
+        //    else
+        //    {
+        //        //TrySetNpcFace(avatar, null, data.CharacterId);
+        //    }
+        //}
 
         private static void resLoad(Avatar avatar, CharacterAvatar? instance, bool isTaiwu, string res=null)
         {
