@@ -49,21 +49,21 @@ namespace QuickKey
         public static KeyCode TaiwuCharMenu = KeyCode.C;
         public static KeyCode TaiwuEquip = KeyCode.V;
         public static KeyCode TaiwuBag = KeyCode.B;
-        public static KeyCode Read = KeyCode.Z;
-        public static KeyCode LoopNeigong = KeyCode.X;
         public static KeyCode TaiwuLifeSkill = KeyCode.Q;
         public static KeyCode TaiwuCombotSkill = KeyCode.E;
+        public static KeyCode Read = KeyCode.Z;
+        public static KeyCode LoopNeigong = KeyCode.X;
 
-        public static KeyCode Map = KeyCode.M;
         public static KeyCode Warehouse = KeyCode.Tab;
-        //public static KeyCode TaiwuVillage = KeyCode.T;
+        public static KeyCode TaiwuVillage = KeyCode.T;
+        public static KeyCode Map = KeyCode.M;
         //public static KeyCode SettleInfo = KeyCode.N;
 
         //public static KeyCode DialogYes = KeyCode.Space;
         //public static KeyCode EventWindowSpace = KeyCode.Space;
 
-        public static KeyCode MainMenu = KeyCode.F10;
-        public static KeyCode SystemOption = KeyCode.F11;
+        //public static KeyCode MainMenu = KeyCode.F10;
+        //public static KeyCode SystemOption = KeyCode.F11;
     }
 
     public static class MyKeyList
@@ -73,7 +73,9 @@ namespace QuickKey
         };
 
         public static List<KeyCode> EventWindowKeys = new List<KeyCode> {
-            KeyCode.Keypad1,KeyCode.Keypad2, KeyCode.Keypad3,KeyCode.Keypad4,KeyCode.Keypad5,KeyCode.Keypad6,
+            KeyCode.Keypad1,KeyCode.Keypad2, KeyCode.Keypad3,
+            KeyCode.Keypad4,KeyCode.Keypad5,KeyCode.Keypad6,
+            KeyCode.Keypad7,KeyCode.Keypad8,KeyCode.Keypad9,
         };
     }
 
@@ -93,6 +95,10 @@ namespace QuickKey
         private Harmony harmony;
 
         public static bool quickKeyEnable = true; // 开关
+
+        public static bool quickConfirm = true; // 确认开关
+        public static bool quickPad = true; // 小键盘开关
+
 
         public static void MyLog(string log)
         {
@@ -116,7 +122,44 @@ namespace QuickKey
         public override void OnModSettingUpdate()
         {
             ModManager.GetSetting(ModIdStr, "quickKeyEnable", ref quickKeyEnable);
+
+            ModManager.GetSetting(ModIdStr, "quickConfirm", ref quickConfirm);
+            ModManager.GetSetting(ModIdStr, "quickPad", ref quickPad);
+
+            //ModManager.GetSetting(ModIdStr, "quickKeyEnable", ref quickKeyEnable);
+            //ModManager.GetSetting(ModIdStr, "quickKeyEnable", ref quickKeyEnable);
+            //ModManager.GetSetting(ModIdStr, "quickKeyEnable", ref quickKeyEnable);
+
+            MyKey.TaiwuCharMenu = TryGetKeyCode("TaiwuCharMenu");
+            MyKey.TaiwuEquip = TryGetKeyCode("TaiwuEquip");
+            MyKey.TaiwuBag = TryGetKeyCode("TaiwuBag");
+            MyKey.Read = TryGetKeyCode("Read");
+            MyKey.LoopNeigong = TryGetKeyCode("LoopNeigong");
+            MyKey.TaiwuLifeSkill = TryGetKeyCode("TaiwuLifeSkill");
+            MyKey.TaiwuCombotSkill = TryGetKeyCode("TaiwuCombotSkill");
+            MyKey.Map = TryGetKeyCode("Map");
+            MyKey.Warehouse = TryGetKeyCode("Warehouse");
+            MyKey.TaiwuVillage = TryGetKeyCode("TaiwuVillage");
+
             MyLog($"setting {quickKeyEnable}");
+        }
+
+        public KeyCode TryGetKeyCode(string key)
+        {
+            string temp = "";
+            KeyCode r = KeyCode.None;
+            ModManager.GetSetting(ModIdStr, key, ref temp);
+            if(Enum.TryParse<KeyCode>(temp, true, out r))
+            {
+                MyLog($"TryGetKeyCode {key} -> {r}");
+                return r;
+            }
+            //if(KeyCode.IsDefined(typeof(KeyCode), temp))
+            //{
+            //    return (KeyCode)temp;
+            //}
+            MyLog($"TryGetKeyCode {key} -> {KeyCode.None}");
+            return KeyCode.None;
         }
 
         public static void ShowMono(GameObject gameObject)
@@ -170,23 +213,29 @@ namespace QuickKey
             {
                 var ui = UIElement.EventWindow.UiBase as UI_EventWindow;
                 var Data = Traverse.Create(ui).Property("Data").GetValue<TaiwuEventDisplayData>();
-                for (int i = 0; i < MyKeyList.EventWindowConfirm.Count; i++)
+                if(quickConfirm)
                 {
-                    if (Input.GetKeyDown(MyKeyList.EventWindowConfirm[i]))
+                    for (int i = 0; i < MyKeyList.EventWindowConfirm.Count; i++)
                     {
-                        if (Data.EscOptionIndex >= 0) { }// 空格被 退出 占用了
-                        else
+                        if (Input.GetKeyDown(MyKeyList.EventWindowConfirm[i]))
                         {
-                            EventWindowClickKey(ui, Data, 0);
+                            if (Data.EscOptionIndex >= 0) { }// 空格被 退出 占用了
+                            else
+                            {
+                                EventWindowClickKey(ui, Data, 0);
+                            }
                         }
                     }
                 }
-                for (int i = 0; i < MyKeyList.EventWindowKeys.Count; i++)
+                if(quickPad)
                 {
-                    KeyCode key = MyKeyList.EventWindowKeys[i];
-                    if (Input.GetKeyDown(key))
+                    for (int i = 0; i < MyKeyList.EventWindowKeys.Count; i++)
                     {
-                        EventWindowClickKey(ui, Data, i);
+                        KeyCode key = MyKeyList.EventWindowKeys[i];
+                        if (Input.GetKeyDown(key))
+                        {
+                            EventWindowClickKey(ui, Data, i);
+                        }
                     }
                 }
             }
@@ -209,27 +258,30 @@ namespace QuickKey
             if (Input.GetKeyDown(MyKey.TaiwuLifeSkill)) LifeSkill();
             if (Input.GetKeyDown(MyKey.TaiwuEquip)) Equip();
         }
-        public static void TaiwuCharacter()
-        {
-            UI_CharacterMenu charMenu = (UI_CharacterMenu)UIElement.CharacterMenu.UiBase;
-            if (UIElement.CharacterMenu.Exist && charMenu.IsTaiwuTeam)  // 太吾的人物界面就关闭，否则打开太吾的
-            {
-                UIElement.CharacterMenu.UiBase.QuickHide();
-                return;
-            }
-            if (!UIElement.CharacterMenu.Exist)
-                OpenTaiwuCharacter();
-            else if (!charMenu.IsTaiwuTeam)
-                RefreshTaiwuCharacter();
-            OpenToTaiwuPage(0); // 第一页
-        }
+
         public static void OpenTaiwuCharacter()
         {
             if (UIElement.CharacterMenu.Exist) return;
 
-            var taiwuCharId = SingletonObject.getInstance<BasicGameData>().TaiwuCharId;
-            if (UIElement.Combat.Exist)    // 战斗时的界面
+            if(UIElement.EventWindow.Exist)
             {
+                var ui = (UIElement.EventWindow.UiBase as UI_EventWindow);
+                Traverse.Create(ui).Method("OnViewLostFocus", UIElement.CharacterMenu).GetValue();
+            }
+
+            var taiwuCharId = SingletonObject.getInstance<BasicGameData>().TaiwuCharId;
+            if (UIElement.CombatBegin.Exist)    // 战斗时的界面
+            {
+                var ui = (UIElement.CombatBegin.UiBase as UI_CombatBegin);
+                Traverse.Create(ui).Method("ShowCharMenu", true, taiwuCharId).GetValue();
+            }
+            else if (UIElement.Combat.Exist)    // 战斗时的界面
+            {
+                var ui = (UIElement.Combat.UiBase as UI_Combat); // 触发下暂停
+                //if(SingletonObject.getInstance<CombatModel>().TimeScale != 0f) // 不是暂停；又感觉还是判断ui稳点
+                var t = Traverse.Create(ui).Field("_pauseToggle").GetValue<CToggle>();
+                if (!t.isOn) { t.isOn = true; }
+                // 可看 CombatAvatar ShowCharMenu
                 CombatUtils.ShowCharMenu(taiwuCharId);
             }
             else
@@ -243,17 +295,16 @@ namespace QuickKey
                 UIManager.Instance.ShowUI(UIElement.CharacterMenu);
             }
         }
-        public static void RefreshTaiwuCharacter()
-        {
-            OpenTaiwuCharacter();
-            //UI_CharacterMenu charMenu = (UI_CharacterMenu)UIElement.CharacterMenu.UiBase;
-            //Traverse.Create(charMenu).Method("CheckTabPage").GetValue<bool>();
-            //Traverse.Create(charMenu).Method("RefreshSubPage").GetValue();
-        }
 
         public static int GetIndexOfCharMenu(CharacterMenuSubPageElement element)
         {
             return element.UiBaseAs<UI_CharacterMenuSubPageBase>().Key;
+        }
+        public static void TaiwuCharacter()
+        {
+            var index = GetIndexOfCharMenu(UIElement.CharacterMenuInfo);
+            OpenTaiwuCharacter();
+            OpenToTaiwuPage(index); // 第一页
         }
         public static void Bag()
         {
@@ -294,10 +345,12 @@ namespace QuickKey
         #region 下方功能界面
         public static void CheckUtil()
         {
+            if (!UIElement.Bottom.Exist) return;
             if (Input.GetKeyDown(MyKey.Read)) Read();
             if (Input.GetKeyDown(MyKey.LoopNeigong)) LoopNeigong();
             if (Input.GetKeyDown(MyKey.Map)) Map();
             if (Input.GetKeyDown(MyKey.Warehouse)) Warehouse();
+            if (Input.GetKeyDown(MyKey.TaiwuVillage)) TaiwuVillage();
         }
         public static void LoopNeigong()
         {
@@ -350,6 +403,17 @@ namespace QuickKey
             }
             UIManager.Instance.ShowUI(UIElement.Warehouse);
         }
+        public static void TaiwuVillage()
+        {
+            if(UIElement.ResourceBar.Exist)
+            {
+                // 具体逻辑可看 UI_ResourceBar OnClick Building
+                var ui = (UIElement.ResourceBar.UiBase as UI_ResourceBar);
+                var b = ui.CGet<Refers>("TaiwuVillageInfo").CGet<CButton>("Building");
+                if(b.interactable) b.onClick?.Invoke();
+            }
+        }
+
         #endregion
     }
 }
