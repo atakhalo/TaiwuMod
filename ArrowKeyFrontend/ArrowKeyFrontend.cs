@@ -38,7 +38,7 @@ namespace ArrowKey
     {
         public static void MyLog(string log)
         {
-            Debug.Log($"[ArrowKey] {log}");
+            //Debug.Log($"[ArrowKey] {log}");
         }
 
         public static void ShowMonoCur(GameObject gameObject)
@@ -188,20 +188,25 @@ namespace ArrowKey
         private Harmony harmony;
 
         public static bool arrowKey = true; // 开关
+        public static bool joystick = false; // 开关
 
         public static KeyCode enterKey = KeyCode.BackQuote; // 进入点击模式
         public static List<KeyCode> enterKeys = new List<KeyCode>()
         { 
-            //KeyCode.Return, KeyCode.KeypadEnter, KeyCode.Space,
             KeyCode.BackQuote,
+        };
+        public static List<KeyCode> enterKeysJoy = new List<KeyCode>()
+        { 
             KeyCode.JoystickButton4 //LB
         };
         public static List<KeyCode> clickKey = new List<KeyCode>()
         {
-            KeyCode.Return, KeyCode.KeypadEnter,
-            KeyCode.JoystickButton7,// 右中键
+            KeyCode.End,
         };
-
+        public static List<KeyCode> clickKeyJoy = new List<KeyCode>()
+        {
+            KeyCode.End,
+        };
 
         public static bool isEnter = false;
         public static bool haveInit = false; // 开关
@@ -232,7 +237,8 @@ namespace ArrowKey
         public override void OnModSettingUpdate()
         {
             ModManager.GetSetting(ModIdStr, "arrowKey", ref arrowKey);
-            MyUtils.MyLog($"setting {arrowKey}");
+            ModManager.GetSetting(ModIdStr, "joystick", ref joystick);
+            MyUtils.MyLog($"setting {arrowKey} {joystick}");
         }
         #region 处理ui变化时，退出导航
         [HarmonyPrefix, HarmonyPatch(typeof(UIManager), "ShowUI")]
@@ -251,34 +257,6 @@ namespace ArrowKey
         public static void GameUpdate(Game __instance)
         {
             if (!arrowKey) return;
-            //if (!Input.anyKey) return;
-            //List<KeyCode> joyKey = new List<KeyCode>()
-            //{
-            //    KeyCode.JoystickButton0,
-            //    KeyCode.JoystickButton1,
-            //    KeyCode.JoystickButton2,
-            //    KeyCode.JoystickButton3,
-            //    KeyCode.JoystickButton4,
-            //    KeyCode.JoystickButton5,
-            //    KeyCode.JoystickButton6,
-            //    KeyCode.JoystickButton7,
-            //    KeyCode.JoystickButton8,
-            //    KeyCode.JoystickButton9,
-            //    KeyCode.JoystickButton10,
-            //    KeyCode.JoystickButton11,
-            //    KeyCode.JoystickButton12,
-            //    KeyCode.JoystickButton13,
-            //    KeyCode.JoystickButton14,
-            //    KeyCode.JoystickButton15,
-            //    KeyCode.JoystickButton16,
-            //    KeyCode.JoystickButton17,
-            //    KeyCode.JoystickButton18,
-            //    KeyCode.JoystickButton19,
-            //};
-            //if(MyUtils.isAnyKey(joyKey, out var key))
-            //{
-            //    MyUtils.MyLog($"按了 {key}");
-            //}
             CheckEnter();
             CheckClickKey();
             CheckMoveKey();
@@ -287,7 +265,8 @@ namespace ArrowKey
 
         public static void CheckEnter()
         {
-            if (MyUtils.NoFuncKey() && MyUtils.isAnyKeyDown(enterKeys, out _))
+            if ((MyUtils.NoFuncKey() && MyUtils.isAnyKeyDown(enterKeys, out _)) ||
+                (joystick && MyUtils.isAnyKeyDown(enterKeysJoy, out _)))
             {
                 if (!isEnter)
                 {
@@ -715,9 +694,10 @@ namespace ArrowKey
         public static void CheckClickKey()
         {
             if (!isEnter) return;
-            if (MyUtils.isAnyKeyDown(clickKey, out var keyCode) && CheckButton(curButton))
+            var toClick = MyUtils.isAnyKeyDown(clickKey, out var keyCode)
+                            || (joystick && MyUtils.isAnyKeyDown(clickKeyJoy, out var keyCodeJoy));
+            if (toClick && CheckButton(curButton))
             {
-                MyUtils.MyLog($"按了 {keyCode}");
                 ClickButton();
             }
         }
@@ -757,17 +737,17 @@ namespace ArrowKey
         {
             if (!isEnter) return;
             var toNext = Input.GetKeyDown(KeyCode.DownArrow) || Input.GetKeyDown(KeyCode.RightArrow);
-            toNext = toNext || Input.GetKeyDown(KeyCode.JoystickButton3); // x
+            if(joystick) toNext = toNext || Input.GetKeyDown(KeyCode.JoystickButton3); // x
 
             var toLast = Input.GetKeyDown(KeyCode.UpArrow) || Input.GetKeyDown(KeyCode.LeftArrow);
-            toLast = toLast || Input.GetKeyDown(KeyCode.JoystickButton2);//y
+            if (joystick) toLast = toLast || Input.GetKeyDown(KeyCode.JoystickButton2);//y
 
-            var toJump = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl)
-                || Input.GetKey(KeyCode.JoystickButton6);
-            var toJumpUI = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift)
-                || Input.GetKey(KeyCode.JoystickButton8);
-            var toUp = Input.GetKey(KeyCode.LeftAlt) || Input.GetKey(KeyCode.RightAlt)
-                || Input.GetKey(KeyCode.JoystickButton9);
+            var toJump = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl);
+            if (joystick) toJump = toJump || Input.GetKey(KeyCode.JoystickButton6);
+            var toJumpUI = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
+            if (joystick) toJumpUI = toJumpUI || Input.GetKey(KeyCode.JoystickButton8);
+            var toUp = Input.GetKey(KeyCode.LeftAlt) || Input.GetKey(KeyCode.RightAlt);
+            if (joystick) toUp = toUp || Input.GetKey(KeyCode.JoystickButton9);
             if (toJump)
             {
                 if (toNext)

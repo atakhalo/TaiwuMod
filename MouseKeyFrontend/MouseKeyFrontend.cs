@@ -40,7 +40,7 @@ namespace MouseKey
     {
         public static void MyLog(string log)
         {
-            Debug.Log($"[MouseKey] {log}");
+            //Debug.Log($"[MouseKey] {log}");
         }
 
         public static void ShowMonoCur(GameObject gameObject)
@@ -166,6 +166,7 @@ namespace MouseKey
         private Harmony harmony;
 
         public static bool mouseKey = true; // 开关
+        public static bool joystick = false; // 开关
 
         public static int mode = 0; // 0； 1 移动；3 滚动
         public static bool isHold = false;
@@ -191,7 +192,8 @@ namespace MouseKey
         public override void OnModSettingUpdate()
         {
             ModManager.GetSetting(ModIdStr, "mouseKey", ref mouseKey);
-            MyUtils.MyLog($"setting {mouseKey}");
+            ModManager.GetSetting(ModIdStr, "joystick", ref joystick);
+            MyUtils.MyLog($"setting {mouseKey} {joystick}");
         }
 
         [HarmonyPostfix, HarmonyPatch(typeof(Game), "Update")]
@@ -207,12 +209,12 @@ namespace MouseKey
         public static void CheckEnter()
         {
             //if (mode != 0) return;
-            var moveMode = (Input.GetKey(KeyCode.LeftControl) && Input.GetKeyDown(KeyCode.BackQuote))
-                || Input.GetKeyDown(KeyCode.JoystickButton6);
-            var scrollMode = (Input.GetKey(KeyCode.LeftShift) && Input.GetKeyDown(KeyCode.BackQuote))
-                || Input.GetKeyDown(KeyCode.JoystickButton7);
+            var moveMode = (Input.GetKey(KeyCode.LeftControl) && Input.GetKeyDown(KeyCode.BackQuote));
+            if(joystick) moveMode = moveMode || Input.GetKeyDown(KeyCode.JoystickButton6);
+            var scrollMode = (Input.GetKey(KeyCode.LeftShift) && Input.GetKeyDown(KeyCode.BackQuote));
+            if(joystick) scrollMode = scrollMode || Input.GetKeyDown(KeyCode.JoystickButton7);
 
-            if(moveMode)
+            if (moveMode)
             {
                 if(isHold) mouse_event(0x0004, 0, 0, 0, 0);
                 if (mode != 1) ToEnter(1);
@@ -318,13 +320,19 @@ namespace MouseKey
             var moveDisX = 0;
             var moveDisY = 0;
 
-            var toMoveXL = Input.GetKey(KeyCode.LeftArrow) || Input.GetAxis("Horizontal") < -0.1f;
-            var toMoveXR = Input.GetKey(KeyCode.RightArrow) || Input.GetAxis("Horizontal") > 0.1f;
-            var toMoveYU = Input.GetKey(KeyCode.UpArrow) || Input.GetAxis("Vertical") > 0.1f;
-            var toMoveYD = Input.GetKey(KeyCode.DownArrow) || Input.GetAxis("Vertical") < -0.1f;
+            var toMoveXL = Input.GetKey(KeyCode.LeftArrow);
+            if (joystick) toMoveXL = toMoveXL || Input.GetAxis("Horizontal") < -0.1f;
+            var toMoveXR = Input.GetKey(KeyCode.RightArrow);
+            if (joystick) toMoveXR = toMoveXR || Input.GetAxis("Horizontal") > 0.1f;
+            var toMoveYU = Input.GetKey(KeyCode.UpArrow);
+            if (joystick) toMoveYU = toMoveYU || Input.GetAxis("Vertical") > 0.1f;
+            var toMoveYD = Input.GetKey(KeyCode.DownArrow);
+            if (joystick) toMoveYD = toMoveYD || Input.GetAxis("Vertical") < -0.1f;
 
-            var slow = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.JoystickButton2);
-            var quick = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.JoystickButton3);
+            var slow = Input.GetKey(KeyCode.LeftControl);
+            if (joystick) slow = slow || Input.GetKey(KeyCode.JoystickButton2);
+            var quick = Input.GetKey(KeyCode.LeftShift);
+            if (joystick) quick = quick || Input.GetKey(KeyCode.JoystickButton3);
 
             var dis = fixDis;
             if (quick) dis = 100;
@@ -362,20 +370,29 @@ namespace MouseKey
         //}
         public static void CheckClick()
         {
-            if (Input.GetKeyDown(KeyCode.JoystickButton0)) SimulateKeyPress(KeyCode.Space);
-            if (Input.GetKeyDown(KeyCode.JoystickButton1)) SimulateKeyPress(KeyCode.Escape);
+            if(joystick)
+            {
+                if (Input.GetKeyDown(KeyCode.JoystickButton0)) SimulateKeyPress(KeyCode.Space);
+                if (Input.GetKeyDown(KeyCode.JoystickButton1)) SimulateKeyPress(KeyCode.Escape);
+            }
 
             if (mode != 1) return;
             uint MOUSEEVENTF_LEFTDOWN = 0x0002;
             uint MOUSEEVENTF_LEFTUP = 0x0004;
             uint MOUSEEVENTF_RIGHTDOWN = 0x0008;
             uint MOUSEEVENTF_RIGHTUP = 0x0010;
-            if (Input.GetKeyDown(KeyCode.LeftAlt) || Input.GetKeyDown(KeyCode.JoystickButton5))
+
+            var toClickDown = Input.GetKeyDown(KeyCode.LeftAlt);
+            if (joystick) toClickDown = toClickDown || Input.GetKeyDown(KeyCode.JoystickButton5);
+            var toClickUp = Input.GetKeyUp(KeyCode.LeftAlt);
+            if (joystick) toClickUp = toClickUp || Input.GetKeyUp(KeyCode.JoystickButton5);
+
+            if (toClickDown)
             {
                 isHold = true;
                 mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
             }
-            else if(Input.GetKeyUp(KeyCode.LeftAlt) || Input.GetKeyUp(KeyCode.JoystickButton5))
+            else if(toClickUp)
             {
                 isHold = false;
                 mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
