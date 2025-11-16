@@ -184,7 +184,7 @@ namespace NpcFace
                 {
                     var dirPath = Path.Combine(modInfo.DirectoryName, dir);
                     tagDirs[tag] = dirPath;
-                    MyLog($"收集到图片目录 {tagDirs.Count} {tag}:{dirPath} ");
+                    MyLog($"太吾迎娇 收集到图片目录 {tagDirs.Count} {tag}:{dirPath} ");
                 }
             }
         }
@@ -201,6 +201,7 @@ namespace NpcFace
             if (npcName.Length > npcResIdx) npcRes[npcNameStr] = npcName[npcResIdx];
             ModManager.GetSetting(ModIdStr, assetKey, ref npcAssetStr);
             if (!string.IsNullOrEmpty(npcAssetStr)) npcRes[npcNameStr] = npcAssetStr;
+            //MyLog($"TryLoadNpc {npcNameStr} {npcRes[npcNameStr]} ({npcResIdx},{npcAssetStr}) ");
         }
 
         public static void TryCreateFile()
@@ -523,11 +524,11 @@ namespace NpcFace
 
 
             var loadMod = GetResPath(avatarAssetName, avatar.Size, out var resPath);
-            //if (resPath == null) return;// 报错出来
+            if (string.IsNullOrEmpty(resPath)) return;// 报错出来
             //MyLog($"load {resPath}");
             //MyLog($"LoadModOrGameResource");
 
-            if(!loadMod)
+            if (!loadMod)
             {
                 ResLoader.LoadModOrGameResource<Texture2D>(resPath, delegate (Texture2D tex)
                 {
@@ -576,10 +577,8 @@ namespace NpcFace
             {
                 string sizeFolder = CharacterAvatar.GetAvatarSizeFolder(avatarSize);
                 string resPath1 = CharacterAvatar.GetNpcFaceResPath(sizeFolder, avatarAssetName);
-                if (File.Exists(resPath1))
-                {
-                    resPath = resPath1; return false;
-                }
+                resPath = resPath1; 
+                return false;
             }
             resPath = "";
             return false;
