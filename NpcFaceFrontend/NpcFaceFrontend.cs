@@ -1,11 +1,13 @@
 ﻿using CharacterDataMonitor;
 using Config;
 using FrameWork;
+using FrameWork.ModSystem;
 using GameData.Domains.Character;
 using GameData.Domains.Character.Display;
 using GameData.Domains.Item;
 using GameData.Domains.Item.Display;
 using GameData.Domains.Map;
+using GameData.Domains.Mod;
 using GameData.Domains.Taiwu;
 using GameData.Domains.Taiwu.Display;
 using GameData.Serializer;
@@ -17,6 +19,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
+using System.Runtime.InteropServices.ComTypes;
 using System.Text.RegularExpressions;
 using TaiwuModdingLib.Core.Plugin;
 using TaiwuModdingLib.Core.Utils;
@@ -99,6 +102,8 @@ namespace NpcFace
         public static List<string> resDirs = new List<string>(); // 资源路径
         public static Dictionary<string, Texture2D> resCache = new Dictionary<string, Texture2D>();
 
+        public static Dictionary<string, string> tagDirs = new Dictionary<string, string>(); // 资源tag对应路径
+
         public static void MyLog(string log)
         {
             Debug.Log($"[NpcFace] {log}");
@@ -108,6 +113,8 @@ namespace NpcFace
         {
             MyLog("Initialize");
             harmony = Harmony.CreateAndPatchAll(typeof(NpcFaceFrontendPlugin));
+            Game.Instance.StartCoroutine(TryScanMod());
+
         }
 
         public override void Dispose()
@@ -140,14 +147,46 @@ namespace NpcFace
             resDirs.Add(""); // 塞个空字段
             string resDirStr = "";
             ModManager.GetSetting(ModIdStr, "resDir1", ref resDirStr);
-            //MyLog($"resDir1 {resDirStr}");
+            //MyLog("OnModSettingUpdate");
+            tagDirs["1"] = new string(resDirStr);
             if (!string.IsNullOrEmpty(resDirStr)) resDirs.Add(resDirStr);
             ModManager.GetSetting(ModIdStr, "resDir2", ref resDirStr);
-            //MyLog($"resDir2 {resDirStr}");
+            tagDirs["2"] = new string(resDirStr);
             if (!string.IsNullOrEmpty(resDirStr)) resDirs.Add(resDirStr);
             ModManager.GetSetting(ModIdStr, "resDir3", ref resDirStr);
-            //MyLog($"resDir3 {resDirStr}");
             if (!string.IsNullOrEmpty(resDirStr)) resDirs.Add(resDirStr);
+            tagDirs["3"] = new string(resDirStr);
+        }
+
+        /// <summary>
+        /// 根据 TaiwuYingjiao.txt 收集tag跟目录
+        /// </summary>
+        /// <returns></returns>
+        public static IEnumerator TryScanMod()
+        {
+            yield return new WaitForSeconds(0);
+            //MyLog("TryScanMod");
+
+            //tagDirs.Clear();
+            foreach (ModId mod in ModManager.EnabledMods)
+            {
+                ModInfoWithDisplayData modInfo = ModManager.GetModInfo(mod);
+                var configPath = Path.Combine(modInfo.DirectoryName, "TaiwuYingjiao.txt");
+                if (!File.Exists(configPath)) continue;
+                var s = File.ReadAllLines(configPath, System.Text.Encoding.UTF8);
+                if (s.Length == 0)
+                    continue;
+                var dir = "TaiwuYingjiao";
+                var tag = "";
+                if(s.Length > 0) tag = s[0].Trim();
+                if(s.Length > 1) dir = s[1].Trim();
+                if(!string.IsNullOrEmpty(tag))
+                {
+                    var dirPath = Path.Combine(modInfo.DirectoryName, dir);
+                    tagDirs[tag] = dirPath;
+                    MyLog($"收集到图片目录 {tagDirs.Count} {tag}:{dirPath} ");
+                }
+            }
         }
 
         public  void TryLoadNpc(string nameKey, string resKey, string assetKey)
@@ -155,12 +194,12 @@ namespace NpcFace
             string npcNameStr = "";
             int npcResIdx = 0;
             string npcAssetStr = "";
-            ModManager.GetSetting(ModIdStr, "npc1", ref npcNameStr);
+            ModManager.GetSetting(ModIdStr, nameKey, ref npcNameStr);
             if (string.IsNullOrEmpty(npcNameStr))
                 return;
-            ModManager.GetSetting(ModIdStr, "npcRes1", ref npcResIdx);
+            ModManager.GetSetting(ModIdStr, resKey, ref npcResIdx);
             if (npcName.Length > npcResIdx) npcRes[npcNameStr] = npcName[npcResIdx];
-            ModManager.GetSetting(ModIdStr, "npcAsset1", ref npcAssetStr);
+            ModManager.GetSetting(ModIdStr, assetKey, ref npcAssetStr);
             if (!string.IsNullOrEmpty(npcAssetStr)) npcRes[npcNameStr] = npcAssetStr;
         }
 
@@ -515,27 +554,25 @@ namespace NpcFace
         private static bool GetResPath(string avatarAssetName, UICommon.Character.Avatar.AvatarSize avatarSize, out string resPath)
         {
             //MyLog($"GetResPath {avatarAssetName}");
-            var dirIdx = -1;
-            var r = avatarAssetName.Split(':');
-            if (r.Length != 0)
+            var dir = TryLoadResDir(avatarAssetName, out var relName);
+            //MyLog($"GetResPath {dir}");
+            if (!string.IsNullOrEmpty(dir)) // resDirs 0 是空字符串
             {
-                int.TryParse(r[0], out dirIdx);
-                //MyLog($"GetResPath dirIdx {dirIdx}");
-            }
-            if (dirIdx >= 1 && dirIdx < resDirs.Count) // resDirs 0 是空字符串
-            {
-                var relName = r[1] + ".png";
+
                 // 先检查 BigTexture mod路径，再检查 BigFace 路径
                 var size1 = GetSizeFolder(avatarSize, 1);
-                var res1 = Path.Combine(resDirs[dirIdx], size1, relName);
+                var res1 = Path.Combine(dir, size1, relName);
+                //MyLog($"GetResPath res1 {res1}");
                 if (File.Exists(res1)) { resPath = res1; return true; }
                 var size0 = GetSizeFolder(avatarSize, 0);
-                var res0 = Path.Combine(resDirs[dirIdx], size1, relName);
+                var res0 = Path.Combine(dir, size0, relName);
+                //MyLog($"GetResPath res0 {res0}");
                 if (File.Exists(res0)) { resPath = res0; return true; }
+                //MyLog($"GetResPath no");
                 resPath = "";
                 return true;
             }
-            else if(dirIdx == -1)
+            else
             {
                 string sizeFolder = CharacterAvatar.GetAvatarSizeFolder(avatarSize);
                 string resPath1 = CharacterAvatar.GetNpcFaceResPath(sizeFolder, avatarAssetName);
@@ -546,6 +583,19 @@ namespace NpcFace
             }
             resPath = "";
             return false;
+        }
+        public static string TryLoadResDir(string avatarAssetName, out string relName)
+        {
+            //MyLog($"TryLoadResDir {avatarAssetName}");
+            var r = avatarAssetName.Split(':');
+            if (r.Length > 1)
+            {
+                //MyLog($"TryLoadResDir {r[0]} {r[1]}");
+                relName = r[1] + ".png";
+                return tagDirs[r[0]];
+            }
+            relName = "";
+            return "";
         }
 
         private static string GetSizeFolder(UICommon.Character.Avatar.AvatarSize avatarSize, int type)
@@ -574,7 +624,7 @@ namespace NpcFace
         private static Texture2D TryLoadImg(string resPath)
         {
             if(resCache.TryGetValue(resPath, out Texture2D img)) { return img; }
-
+            //MyLog($"tryLoad {resPath}");
             byte[] fileData = File.ReadAllBytes(resPath);
             Texture2D texture = new Texture2D(1, 1);
             texture.name = Path.GetFileName(resPath);
