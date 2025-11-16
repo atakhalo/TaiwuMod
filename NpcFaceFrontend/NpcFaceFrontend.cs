@@ -22,13 +22,14 @@ using TaiwuModdingLib.Core.Plugin;
 using TaiwuModdingLib.Core.Utils;
 using TMPro;
 using UICommon.Character;
-using UICommon.Character.Avatar;
+//using UICommon.Character.Avatar;
 using UnityEngine;
 
+using TaiwuAvatar = UICommon.Character.Avatar.Avatar;
 
-namespace Minutiae
+namespace NpcFace
 {
-    [PluginConfig(pluginName: "NpcFace", creatorId: "atakhalo", pluginVersion: "0.2.0.0")]
+    [PluginConfig(pluginName: "NpcFace", creatorId: "atakhalo", pluginVersion: "0.3.0.0")]
     public class NpcFaceFrontendPlugin : TaiwuRemakePlugin
     {
         private Harmony harmony;
@@ -95,6 +96,9 @@ namespace Minutiae
         public static bool toCreateFile = false;
         public static bool toReadFile = false;
 
+        public static List<string> resDirs = new List<string>(); // 资源路径
+        public static Dictionary<string, Texture2D> resCache = new Dictionary<string, Texture2D>();
+
         public static void MyLog(string log)
         {
             Debug.Log($"[NpcFace] {log}");
@@ -122,40 +126,42 @@ namespace Minutiae
             ModManager.GetSetting(ModIdStr, "npcNameCustom", ref npcNameCustom);
             //MyLog($"{npcFace}, {npcNameIdx}, {customNpc}, {npcNameCustom}");
 
-            //string npcNameStr = "";
-            //int npcId = -1;
-            ////string npcRes = "";
-            //int npcResIdx = 0;
-            //ModManager.GetSetting(ModIdStr, "npc1", ref npcNameStr);
-            //int.TryParse(npcNameStr, out npcId);
-            //ModManager.GetSetting(ModIdStr, "npcRes1", ref npcResIdx);
-            //if (npcId != -1 && npcName.Length > npcResIdx) idRes[npcId] = npcName[npcResIdx];
-            //ModManager.GetSetting(ModIdStr, "npc2", ref npcNameStr);
-            //int.TryParse(npcNameStr, out npcId);
-            //ModManager.GetSetting(ModIdStr, "npcRes2", ref npcResIdx);
-            //if (npcId != -1 && npcName.Length > npcResIdx) idRes[npcId] = npcName[npcResIdx];
-            //ModManager.GetSetting(ModIdStr, "npc3", ref npcNameStr);
-            //int.TryParse(npcNameStr, out npcId);
-            //ModManager.GetSetting(ModIdStr, "npcRes3", ref npcResIdx);
-            //if (npcId != -1 && npcName.Length > npcResIdx) idRes[npcId] = npcName[npcResIdx];
-
-            string npcNameStr = "";
-            int npcResIdx = 0;
             npcRes.Clear();
-            ModManager.GetSetting(ModIdStr, "npc1", ref npcNameStr);
-            ModManager.GetSetting(ModIdStr, "npcRes1", ref npcResIdx);
-            if (!string.IsNullOrEmpty(npcNameStr) && npcName.Length > npcResIdx) npcRes[npcNameStr] = npcName[npcResIdx];
-            ModManager.GetSetting(ModIdStr, "npc2", ref npcNameStr);
-            ModManager.GetSetting(ModIdStr, "npcRes2", ref npcResIdx);
-            if (!string.IsNullOrEmpty(npcNameStr) && npcName.Length > npcResIdx) npcRes[npcNameStr] = npcName[npcResIdx];
-            ModManager.GetSetting(ModIdStr, "npc3", ref npcNameStr);
-            ModManager.GetSetting(ModIdStr, "npcRes3", ref npcResIdx);
-            if (!string.IsNullOrEmpty(npcNameStr) && npcName.Length > npcResIdx) npcRes[npcNameStr] = npcName[npcResIdx];
+            TryLoadNpc("npc1", "npcRes1", "npcAsset1");
+            TryLoadNpc("npc2", "npcRes2", "npcAsset2");
+            TryLoadNpc("npc3", "npcRes3", "npcAsset3");
 
             ModManager.GetSetting(ModIdStr, "toCreateFile", ref toCreateFile);
             TryCreateFile();
             ModManager.GetSetting(ModIdStr, "toReadFile", ref toReadFile);
             TryReadFile();
+
+            resDirs.Clear();
+            resDirs.Add(""); // 塞个空字段
+            string resDirStr = "";
+            ModManager.GetSetting(ModIdStr, "resDir1", ref resDirStr);
+            //MyLog($"resDir1 {resDirStr}");
+            if (!string.IsNullOrEmpty(resDirStr)) resDirs.Add(resDirStr);
+            ModManager.GetSetting(ModIdStr, "resDir2", ref resDirStr);
+            //MyLog($"resDir2 {resDirStr}");
+            if (!string.IsNullOrEmpty(resDirStr)) resDirs.Add(resDirStr);
+            ModManager.GetSetting(ModIdStr, "resDir3", ref resDirStr);
+            //MyLog($"resDir3 {resDirStr}");
+            if (!string.IsNullOrEmpty(resDirStr)) resDirs.Add(resDirStr);
+        }
+
+        public  void TryLoadNpc(string nameKey, string resKey, string assetKey)
+        {
+            string npcNameStr = "";
+            int npcResIdx = 0;
+            string npcAssetStr = "";
+            ModManager.GetSetting(ModIdStr, "npc1", ref npcNameStr);
+            if (string.IsNullOrEmpty(npcNameStr))
+                return;
+            ModManager.GetSetting(ModIdStr, "npcRes1", ref npcResIdx);
+            if (npcName.Length > npcResIdx) npcRes[npcNameStr] = npcName[npcResIdx];
+            ModManager.GetSetting(ModIdStr, "npcAsset1", ref npcAssetStr);
+            if (!string.IsNullOrEmpty(npcAssetStr)) npcRes[npcNameStr] = npcAssetStr;
         }
 
         public static void TryCreateFile()
@@ -201,7 +207,7 @@ namespace Minutiae
             }
         }
 
-        public static void TrySetNpcFace(Avatar avatar, CharacterAvatar? instance, int charId)
+        public static void TrySetNpcFace(TaiwuAvatar avatar, CharacterAvatar? instance, int charId)
         {
             if (avatar == null) return;
             var curId = charId;
@@ -213,7 +219,7 @@ namespace Minutiae
             }
         }
 
-        public static void TrySetNpcFace(Avatar avatar, CharacterAvatar? instance, CharacterDisplayData data)
+        public static void TrySetNpcFace(TaiwuAvatar avatar, CharacterAvatar? instance, CharacterDisplayData data)
         {
             if (avatar == null) return;
             var curId = data.CharacterId;
@@ -228,7 +234,7 @@ namespace Minutiae
         /// <summary>
         /// 根据 mousetips 找id
         /// </summary>
-        public static void TrySetNpcFace(Avatar avatar, CharacterAvatar? instance, AvatarRelatedData relatedData)
+        public static void TrySetNpcFace(TaiwuAvatar avatar, CharacterAvatar? instance, AvatarRelatedData relatedData)
         {
             //MyLog("TrySetNpcFace");
             if(avatar == null) return;
@@ -279,7 +285,7 @@ namespace Minutiae
             return charId;
         }
 
-        public static void TrySetNpcFaceByName(Avatar avatar, CharacterAvatar? instance, AvatarRelatedData relatedData)
+        public static void TrySetNpcFaceByName(TaiwuAvatar avatar, CharacterAvatar? instance, AvatarRelatedData relatedData)
         {
             //MyLog($"TrySetNpcFaceByName relatedData {avatar}");
             if (avatar == null) return;
@@ -298,7 +304,7 @@ namespace Minutiae
             }
         }
 
-        public static void TrySetNpcFaceByName(Avatar avatar, CharacterAvatar? instance, CharacterDisplayData displayData)
+        public static void TrySetNpcFaceByName(TaiwuAvatar avatar, CharacterAvatar? instance, CharacterDisplayData displayData)
         {
             //MyLog($"TrySetNpcFaceByName displayData  {avatar}");
             if (avatar == null) return;
@@ -370,8 +376,8 @@ namespace Minutiae
         }
 
         #region
-        [HarmonyPostfix, HarmonyPatch(typeof(Avatar), "Refresh", argumentTypes: new Type[1] { typeof(CharacterDisplayData) })]
-        public static void OnRefreshChar(Avatar __instance, CharacterDisplayData displayData)
+        [HarmonyPostfix, HarmonyPatch(typeof(TaiwuAvatar), "Refresh", argumentTypes: new Type[1] { typeof(CharacterDisplayData) })]
+        public static void OnRefreshChar(TaiwuAvatar __instance, CharacterDisplayData displayData)
         {
             if (!npcFace) return;
             var charId = displayData.CharacterId;
@@ -386,21 +392,21 @@ namespace Minutiae
         }
 
         // 关系界面 主体
-        [HarmonyPostfix, HarmonyPatch(typeof(Avatar), "Refresh", argumentTypes: new Type[1] { typeof(AvatarRelatedData) })]
-        public static void OnRefreshCharRelated(Avatar __instance, AvatarRelatedData relatedData)
+        [HarmonyPostfix, HarmonyPatch(typeof(TaiwuAvatar), "Refresh", argumentTypes: new Type[1] { typeof(AvatarRelatedData) })]
+        public static void OnRefreshCharRelated(TaiwuAvatar __instance, AvatarRelatedData relatedData)
         {
             if (!npcFace) return;
             //MyLog("OnRefreshCharRelated");
             DelayCall(__instance, relatedData);
         }
 
-        public static void DelayCall(Avatar avatar, AvatarRelatedData relatedData)
+        public static void DelayCall(TaiwuAvatar avatar, AvatarRelatedData relatedData)
         {
             //Game.Instance.StartCoroutine(DelayCoroutine(TrySetNpcFace, 0, avatar, null, relatedData));
             Game.Instance.StartCoroutine(DelayCoroutine(TrySetNpcFaceByName, 0, avatar, null, relatedData));
         }
 
-        private static IEnumerator DelayCoroutine(Action<Avatar, CharacterAvatar, AvatarRelatedData> action, float delay, Avatar avatar, CharacterAvatar instance, AvatarRelatedData relatedData)
+        private static IEnumerator DelayCoroutine(Action<TaiwuAvatar, CharacterAvatar, AvatarRelatedData> action, float delay, TaiwuAvatar avatar, CharacterAvatar instance, AvatarRelatedData relatedData)
         {
             yield return new WaitForSeconds(delay);
             action?.Invoke(avatar, instance, relatedData);
@@ -417,13 +423,13 @@ namespace Minutiae
             var taiwuCharId = SingletonObject.getInstance<BasicGameData>().TaiwuCharId;
             if (__instance.CharacterId == taiwuCharId)
             {
-                var avatar = Traverse.Create(__instance).Field("_avatar").GetValue<Avatar>();
+                var avatar = Traverse.Create(__instance).Field("_avatar").GetValue<TaiwuAvatar>();
                 resLoad(avatar, __instance, isTaiwu: true);
                 return;
             }
             else
             {
-                var avatar = Traverse.Create(__instance).Field("_avatar").GetValue<Avatar>();
+                var avatar = Traverse.Create(__instance).Field("_avatar").GetValue<TaiwuAvatar>();
                 //TrySetNpcFaceByName(avatar, null, relatedData:null);
                 DelayCall(avatar, null);
 
@@ -449,7 +455,7 @@ namespace Minutiae
         //    }
         //}
 
-        private static void resLoad(Avatar avatar, CharacterAvatar? instance, bool isTaiwu, string res=null)
+        private static void resLoad(TaiwuAvatar avatar, CharacterAvatar? instance, bool isTaiwu, string res=null)
         {
             //MyLog($"LoadModOrGameResource 0 ");
             if (!npcFace) return;
@@ -476,22 +482,116 @@ namespace Minutiae
             }
             //MyLog($"LoadModOrGameResource 4");
 
-            string sizeFolder = CharacterAvatar.GetAvatarSizeFolder(avatar.Size);
-            string resPath = CharacterAvatar.GetNpcFaceResPath(sizeFolder, avatarAssetName);
+
+            var loadMod = GetResPath(avatarAssetName, avatar.Size, out var resPath);
+            //if (resPath == null) return;// 报错出来
             //MyLog($"load {resPath}");
             //MyLog($"LoadModOrGameResource");
 
-            ResLoader.LoadModOrGameResource<Texture2D>(resPath, delegate (Texture2D tex)
+            if(!loadMod)
             {
-                //MyLog($"LoadModOrGameResource");
-                if (avatar == null) return;
-                //var cloth = avatar.CGet<CImage>("Cloth");
-                //MyLog($"LoadModOrGameResource {cloth} {cloth?.sprite}");
+                ResLoader.LoadModOrGameResource<Texture2D>(resPath, delegate (Texture2D tex)
+                {
+                    //MyLog($"LoadModOrGameResource");
+                    if (avatar == null) return;
+                    //var cloth = avatar.CGet<CImage>("Cloth");
+                    //MyLog($"LoadModOrGameResource {cloth} {cloth?.sprite}");
+                    avatar.Refresh(tex);
+                    if (instance == null) return;
+                    instance.OnFillAvatar?.Invoke();
+                }, (tex) => {
+                });
+            }
+            else
+            {
+                var tex = TryLoadImg(resPath);
+                if(tex == null) return;
                 avatar.Refresh(tex);
                 if (instance == null) return;
                 instance.OnFillAvatar?.Invoke();
-            }, (tex) => {
-            });
+            }
+        }
+
+        private static bool GetResPath(string avatarAssetName, UICommon.Character.Avatar.AvatarSize avatarSize, out string resPath)
+        {
+            //MyLog($"GetResPath {avatarAssetName}");
+            var dirIdx = -1;
+            var r = avatarAssetName.Split(':');
+            if (r.Length != 0)
+            {
+                int.TryParse(r[0], out dirIdx);
+                //MyLog($"GetResPath dirIdx {dirIdx}");
+            }
+            if (dirIdx >= 1 && dirIdx < resDirs.Count) // resDirs 0 是空字符串
+            {
+                var relName = r[1] + ".png";
+                // 先检查 BigTexture mod路径，再检查 BigFace 路径
+                var size1 = GetSizeFolder(avatarSize, 1);
+                var res1 = Path.Combine(resDirs[dirIdx], size1, relName);
+                if (File.Exists(res1)) { resPath = res1; return true; }
+                var size0 = GetSizeFolder(avatarSize, 0);
+                var res0 = Path.Combine(resDirs[dirIdx], size1, relName);
+                if (File.Exists(res0)) { resPath = res0; return true; }
+                resPath = "";
+                return true;
+            }
+            else if(dirIdx == -1)
+            {
+                string sizeFolder = CharacterAvatar.GetAvatarSizeFolder(avatarSize);
+                string resPath1 = CharacterAvatar.GetNpcFaceResPath(sizeFolder, avatarAssetName);
+                if (File.Exists(resPath1))
+                {
+                    resPath = resPath1; return false;
+                }
+            }
+            resPath = "";
+            return false;
+        }
+
+        private static string GetSizeFolder(UICommon.Character.Avatar.AvatarSize avatarSize, int type)
+        {
+            if(type == 0)
+            {
+                //return CharacterAvatar.GetAvatarSizeFolder(avatar.Size);
+                return avatarSize switch
+                {
+                    UICommon.Character.Avatar.AvatarSize.Normal => "NormalFace",
+                    UICommon.Character.Avatar.AvatarSize.Small => "SmallFace",
+                    _ => "BigFace",
+                };
+            }
+            else if (type == 1)
+            {
+                return avatarSize switch
+                {
+                    UICommon.Character.Avatar.AvatarSize.Normal => "NormalTexture",
+                    UICommon.Character.Avatar.AvatarSize.Small => "SmallTexture",
+                    _ => "BigTexture",
+                };
+            }
+            return "";
+        }
+        private static Texture2D TryLoadImg(string resPath)
+        {
+            if(resCache.TryGetValue(resPath, out Texture2D img)) { return img; }
+
+            byte[] fileData = File.ReadAllBytes(resPath);
+            Texture2D texture = new Texture2D(1, 1);
+            texture.name = Path.GetFileName(resPath);
+
+            if (texture.LoadImage(fileData))
+            {
+                resCache[resPath] = texture;
+                return texture;
+            }
+            return null;
+            //UnityEngine.image
+            //UnityEngine.ImageConversion
+            
+            //if (texture.LoadImage(fileData))
+            //{
+            //    return texture;
+            //}
         }
         #endregion
 
