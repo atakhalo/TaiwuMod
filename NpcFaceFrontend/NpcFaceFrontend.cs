@@ -32,13 +32,16 @@ using TaiwuAvatar = UICommon.Character.Avatar.Avatar;
 
 namespace NpcFace
 {
-    [PluginConfig(pluginName: "NpcFace", creatorId: "atakhalo", pluginVersion: "0.3.0.0")]
+    [PluginConfig(pluginName: "NpcFace", creatorId: "atakhalo", pluginVersion: "0.3.0.2")]
     public class NpcFaceFrontendPlugin : TaiwuRemakePlugin
     {
         private Harmony harmony;
 
 
         public static bool npcFace; // 开关 是否开启
+        public static bool forTaiwu; // 开关 太吾是否开启
+        public static bool forNpc; // 开关 NPC是否开启
+
 
         public static string[] npcName = {
             "NpcFace_yingjiao",//迎娇
@@ -128,6 +131,8 @@ namespace NpcFace
         public override void OnModSettingUpdate()
         {
             ModManager.GetSetting(ModIdStr, "npcFace", ref npcFace);
+            ModManager.GetSetting(ModIdStr, "forTaiwu", ref forTaiwu);
+            ModManager.GetSetting(ModIdStr, "forNpc", ref forNpc);
             ModManager.GetSetting(ModIdStr, "npcNameIdx", ref npcNameIdx);
             ModManager.GetSetting(ModIdStr, "customNpc", ref customNpc);
             ModManager.GetSetting(ModIdStr, "npcNameCustom", ref npcNameCustom);
@@ -499,6 +504,9 @@ namespace NpcFace
         {
             //MyLog($"LoadModOrGameResource 0 ");
             if (!npcFace) return;
+            if (isTaiwu && !forTaiwu) return;
+            if (!isTaiwu && !forNpc) return;
+
             //MyLog($"LoadModOrGameResource 1 ");
             if (avatar == null) return;
             //MyLog($"LoadModOrGameResource 2");
@@ -507,7 +515,11 @@ namespace NpcFace
             if(isTaiwu)
             {
                 if (customNpc)
+                {
+                    if (string.IsNullOrEmpty(npcNameCustom)) return;
                     avatarAssetName = npcNameCustom;
+
+                }
                 else
                 {
                     avatarAssetName = npcName[npcNameIdx];
