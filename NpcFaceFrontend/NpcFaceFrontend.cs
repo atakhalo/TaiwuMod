@@ -398,6 +398,20 @@ namespace NpcFace
 
         public static string TryGetNpcName(Transform transform)
         {
+            var mouseTipDisplayer = transform.GetComponent<MouseTipDisplayer>();
+            if (mouseTipDisplayer == null) mouseTipDisplayer = transform.GetComponentInChildren<MouseTipDisplayer>();
+            CharacterDisplayData charData = null;
+            if (mouseTipDisplayer != null && mouseTipDisplayer.RuntimeParam != null)
+            {
+                mouseTipDisplayer.RuntimeParam.Get("CharData", out charData);
+                if (charData != null)
+                {
+                    var taiwuId = SingletonObject.getInstance<BasicGameData>().TaiwuCharId;
+                    string curName = NameCenter.GetMonasticTitleOrDisplayName(charData, isTaiwu: charData.CharacterId == taiwuId);
+                    return curName;
+                }
+            }
+
             TextMeshProUGUI t = null;
             var ts = transform.GetComponentsInChildren<TextMeshProUGUI>();
             foreach(var t1 in ts)
