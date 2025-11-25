@@ -32,7 +32,7 @@ using TaiwuAvatar = UICommon.Character.Avatar.Avatar;
 
 namespace NpcFace
 {
-    [PluginConfig(pluginName: "NpcFace", creatorId: "atakhalo", pluginVersion: "0.3.0.2")]
+    [PluginConfig(pluginName: "NpcFace", creatorId: "atakhalo", pluginVersion: "0.3.0.3")]
     public class NpcFaceFrontendPlugin : TaiwuRemakePlugin
     {
         private Harmony harmony;
@@ -337,7 +337,7 @@ namespace NpcFace
             var curName = TryFindName(avatar.transform, maxUp: 3);
             if (curName != "")
             {
-                MyLog($"TrySetNpcFaceByName 找到名字 {curName}");
+                //MyLog($"TrySetNpcFaceByName 找到名字 {curName}");
                 var taiwuDisplayName = SingletonObject.getInstance<BasicGameData>().TaiwuDisplayName;
                 if (curName == taiwuDisplayName)
                 {
@@ -353,12 +353,12 @@ namespace NpcFace
                     }
                     else
                     {
-                        MyLog($"TrySetNpcFaceByName 名字不对");
+                        //MyLog($"TrySetNpcFaceByName 名字不对");
                         return false;
                     }
                 }
             }
-            MyLog($"TrySetNpcFaceByName 没找到名字");
+            //MyLog($"TrySetNpcFaceByName 没找到名字");
             return false;
         }
 
@@ -382,9 +382,9 @@ namespace NpcFace
                 var taiwuDisplayName = SingletonObject.getInstance<BasicGameData>().TaiwuDisplayName;
                 return taiwuDisplayName;
             }
-            //var ui = transform.GetComponentInParent<UIBase>();
-            //if (ui is UI_CharacterMenuInfo)
-            //    MyLog("$正在查找 UI_CharacterMenuInfo");
+            var ui = transform.GetComponentInParent<UIBase>();
+            //if (ui is UI_LifeSkillCombatBegin)
+            //    MyLog("$正在查找 UI_LifeSkillCombatBegin");
             var s = TryGetNpcName(transform);
             if (s == null || s == "")
             {
@@ -398,20 +398,6 @@ namespace NpcFace
 
         public static string TryGetNpcName(Transform transform)
         {
-            var mouseTipDisplayer = transform.GetComponent<MouseTipDisplayer>();
-            if (mouseTipDisplayer == null) mouseTipDisplayer = transform.GetComponentInChildren<MouseTipDisplayer>();
-            CharacterDisplayData charData = null;
-            if (mouseTipDisplayer != null && mouseTipDisplayer.RuntimeParam != null)
-            {
-                mouseTipDisplayer.RuntimeParam.Get("CharData", out charData);
-                if (charData != null)
-                {
-                    var taiwuId = SingletonObject.getInstance<BasicGameData>().TaiwuCharId;
-                    string curName = NameCenter.GetMonasticTitleOrDisplayName(charData, isTaiwu: charData.CharacterId == taiwuId);
-                    return curName;
-                }
-            }
-
             TextMeshProUGUI t = null;
             var ts = transform.GetComponentsInChildren<TextMeshProUGUI>();
             foreach(var t1 in ts)
@@ -430,6 +416,21 @@ namespace NpcFace
                 return t.text;
             }
             //MyLog($" {transform} 无 tmp ");
+            var mouseTipDisplayer = transform.GetComponent<MouseTipDisplayer>();
+            if (mouseTipDisplayer == null) mouseTipDisplayer = transform.GetComponentInChildren<MouseTipDisplayer>();
+            CharacterDisplayData charData = null;
+            if (mouseTipDisplayer != null && mouseTipDisplayer.RuntimeParam != null)
+            {
+                mouseTipDisplayer.RuntimeParam.Get("CharData", out charData);
+                if (charData != null)
+                {
+                    var taiwuId = SingletonObject.getInstance<BasicGameData>().TaiwuCharId;
+                    string curName = NameCenter.GetMonasticTitleOrDisplayName(charData, isTaiwu: charData.CharacterId == taiwuId);
+                    //MyLog($"找到 {transform}下的 MouseTipDisplayer CharData {curName}");
+
+                    return curName;
+                }
+            }
             var r = transform.GetComponent<Refers>();
             if (r is Avatar) r = null;
             if (r != null)
@@ -486,7 +487,13 @@ namespace NpcFace
         }
 
         // 人物界面, 
-        // 返回的时候，判断是否tips在请求，是的话 发起计算请求
+        [HarmonyReversePatch, HarmonyPatch(typeof(CharacterAvatar), "FillElement")]
+        public static void FillElementOrigin(CharacterAvatar __instance)
+        {
+            return;
+        }
+
+        // 人物界面, 
         [HarmonyPostfix, HarmonyPatch(typeof(CharacterAvatar), "FillElement")]
         public static void FillElementPost(CharacterAvatar __instance)
         {
@@ -502,59 +509,50 @@ namespace NpcFace
             }
             else
             {
-                var avatar = Traverse.Create(__instance).Field("_avatar").GetValue<TaiwuAvatar>();
-                MyLog("FillElement 先设置一遍");
-                TrySetNpcFaceByName(avatar, null, relatedData: null);
-                DelayCall2(avatar, null);
 
-                //TrySetNpcFace(avatar, __instance, __instance.CharacterId);
+                var avatar = Traverse.Create(__instance).Field("_avatar").GetValue<TaiwuAvatar>();
+                //MyLog($"FillElementPost 1");
+                TrySetNpcFaceByName(avatar, __instance, relatedData: null);
+                //MyLog($"FillElementPost 1-1");
+                DelayCall2(avatar, __instance, null);
             }
         }
 
-        public static void DelayCall2(TaiwuAvatar avatar, AvatarRelatedData relatedData)
+        public static void DelayCall2(TaiwuAvatar avatar, CharacterAvatar instance, AvatarRelatedData relatedData)
         {
             //Game.Instance.StartCoroutine(DelayCoroutine(TrySetNpcFace, 0, avatar, null, relatedData));
-            Game.Instance.StartCoroutine(DelayCoroutine2(TrySetNpcFaceByName, avatar, null, relatedData));
+            Game.Instance.StartCoroutine(DelayCoroutine2(TrySetNpcFaceByName, avatar, instance, relatedData));
         }
 
         private static IEnumerator DelayCoroutine2(Func<TaiwuAvatar, CharacterAvatar, AvatarRelatedData, bool> action, TaiwuAvatar avatar, CharacterAvatar instance, AvatarRelatedData relatedData)
         {
-            MyLog("DelayCoroutine2 当前帧");
-            yield return null;
-            MyLog("DelayCoroutine2 下一帧");
-            //yield return new WaitForSeconds(delay);
-            var doRes = action.Invoke(avatar, instance, relatedData);
-            if(!doRes)
-            {
-                MyLog("DelayCoroutine2 非指定npc，刷新");
-                avatar.Refresh();
-            }
-            else
-            {
-                MyLog("DelayCoroutine2 是指定npc");
-            }
-            //yield return null;
-            //action?.Invoke(avatar, instance, relatedData);
-            // 需要处理 延迟后
-        }
+            yield return new WaitForSecondsRealtime(0);
+            if (avatar == null || instance == null) yield break;
+            //MyLog($"FillElementPost 2");
+            if (!action.Invoke(avatar, instance, relatedData)) { try { FillElementOrigin(instance); } catch { } }
+            //MyLog($"FillElementPost 2-1");
 
-        //// tips界面
-        //[HarmonyPostfix, HarmonyPatch(typeof(MouseTipCharacterOnMapBlock), "SetAvatar")]
-        //public static void SetAvatar(MouseTipCharacterOnMapBlock __instance, CharacterDisplayDataForMapBlock data)
-        //{
-        //    if (!npcFace) return;
-        //    var taiwuCharId = SingletonObject.getInstance<BasicGameData>().TaiwuCharId;
-        //    Refers _mainPanel = Traverse.Create(__instance).Field("_mainPanel").GetValue<Refers>();
-        //    Avatar avatar = _mainPanel.CGet<Avatar>("Avatar");
-        //    if (data.CharacterId == taiwuCharId)
-        //    {
-        //        //resLoad(avatar, null, isTaiwu: true);
-        //    }
-        //    else
-        //    {
-        //        //TrySetNpcFace(avatar, null, data.CharacterId);
-        //    }
-        //}
+            //yield return new WaitForSecondsRealtime(0.01f);
+            //if (avatar == null) yield break;
+            //MyLog($"FillElementPost 3");
+            //if (!action.Invoke(avatar, instance, relatedData)) { avatar.Refresh(); }
+            //MyLog($"FillElementPost 3-1");
+
+            yield return new WaitForSecondsRealtime(0.05f);
+            if (avatar == null || instance == null) yield break;
+            //MyLog($"FillElementPost 4");
+            if (!action.Invoke(avatar, instance, relatedData)) { try { FillElementOrigin(instance); } catch { } }
+            //MyLog($"FillElementPost 4-1");
+
+            //yield return new WaitForSecondsRealtime(0.1f);
+            //if (avatar == null) yield break;
+            //if (!action.Invoke(avatar, instance, relatedData)) { avatar.Refresh(); }
+            //yield return new WaitForSecondsRealtime(0.5f);
+            //if (avatar == null) yield break;
+            //MyLog($"FillElementPost 6");
+            //if (!action.Invoke(avatar, instance, relatedData)) { avatar.Refresh(); }
+            //MyLog($"FillElementPost 6-1");
+        }
 
         private static void resLoad(TaiwuAvatar avatar, CharacterAvatar? instance, bool isTaiwu, string res=null)
         {
