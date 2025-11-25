@@ -330,23 +330,36 @@ namespace NpcFace
             return charId;
         }
 
-        public static void TrySetNpcFaceByName(TaiwuAvatar avatar, CharacterAvatar? instance, AvatarRelatedData relatedData)
+        public static bool TrySetNpcFaceByName(TaiwuAvatar avatar, CharacterAvatar? instance, AvatarRelatedData relatedData)
         {
             //MyLog($"TrySetNpcFaceByName relatedData {avatar}");
-            if (avatar == null) return;
+            if (avatar == null) return false;
             var curName = TryFindName(avatar.transform, maxUp: 3);
             if (curName != "")
             {
-                //MyLog($"TrySetNpcFaceByName 找到名字 {curName}");
+                MyLog($"TrySetNpcFaceByName 找到名字 {curName}");
                 var taiwuDisplayName = SingletonObject.getInstance<BasicGameData>().TaiwuDisplayName;
-                if(curName == taiwuDisplayName)
+                if (curName == taiwuDisplayName)
+                {
                     resLoad(avatar, instance, isTaiwu: true);
+                    return true;
+                }
                 else
                 {
                     if (npcRes.ContainsKey(curName))
-                        resLoad(avatar, instance, isTaiwu: false, npcRes[curName]);
+                    { 
+                        resLoad(avatar, instance, isTaiwu: false, npcRes[curName]); 
+                        return true;
+                    }
+                    else
+                    {
+                        MyLog($"TrySetNpcFaceByName 名字不对");
+                        return false;
+                    }
                 }
             }
+            MyLog($"TrySetNpcFaceByName 没找到名字");
+            return false;
         }
 
         public static void TrySetNpcFaceByName(TaiwuAvatar avatar, CharacterAvatar? instance, CharacterDisplayData displayData)
@@ -451,9 +464,10 @@ namespace NpcFace
             Game.Instance.StartCoroutine(DelayCoroutine(TrySetNpcFaceByName, 0, avatar, null, relatedData));
         }
 
-        private static IEnumerator DelayCoroutine(Action<TaiwuAvatar, CharacterAvatar, AvatarRelatedData> action, float delay, TaiwuAvatar avatar, CharacterAvatar instance, AvatarRelatedData relatedData)
+        private static IEnumerator DelayCoroutine(Func<TaiwuAvatar, CharacterAvatar, AvatarRelatedData, bool> action, float delay, TaiwuAvatar avatar, CharacterAvatar instance, AvatarRelatedData relatedData)
         {
-            yield return new WaitForSeconds(delay);
+            yield return null;
+            //yield return new WaitForSeconds(delay);
             action?.Invoke(avatar, instance, relatedData);
         }
 
@@ -475,11 +489,39 @@ namespace NpcFace
             else
             {
                 var avatar = Traverse.Create(__instance).Field("_avatar").GetValue<TaiwuAvatar>();
-                //TrySetNpcFaceByName(avatar, null, relatedData:null);
-                DelayCall(avatar, null);
+                MyLog("FillElement 先设置一遍");
+                TrySetNpcFaceByName(avatar, null, relatedData: null);
+                DelayCall2(avatar, null);
 
                 //TrySetNpcFace(avatar, __instance, __instance.CharacterId);
             }
+        }
+
+        public static void DelayCall2(TaiwuAvatar avatar, AvatarRelatedData relatedData)
+        {
+            //Game.Instance.StartCoroutine(DelayCoroutine(TrySetNpcFace, 0, avatar, null, relatedData));
+            Game.Instance.StartCoroutine(DelayCoroutine2(TrySetNpcFaceByName, avatar, null, relatedData));
+        }
+
+        private static IEnumerator DelayCoroutine2(Func<TaiwuAvatar, CharacterAvatar, AvatarRelatedData, bool> action, TaiwuAvatar avatar, CharacterAvatar instance, AvatarRelatedData relatedData)
+        {
+            MyLog("DelayCoroutine2 当前帧");
+            yield return null;
+            MyLog("DelayCoroutine2 下一帧");
+            //yield return new WaitForSeconds(delay);
+            var doRes = action.Invoke(avatar, instance, relatedData);
+            if(!doRes)
+            {
+                MyLog("DelayCoroutine2 非指定npc，刷新");
+                avatar.Refresh();
+            }
+            else
+            {
+                MyLog("DelayCoroutine2 是指定npc");
+            }
+            //yield return null;
+            //action?.Invoke(avatar, instance, relatedData);
+            // 需要处理 延迟后
         }
 
         //// tips界面
