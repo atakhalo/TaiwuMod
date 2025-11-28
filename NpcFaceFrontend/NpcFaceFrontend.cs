@@ -32,7 +32,7 @@ using TaiwuAvatar = UICommon.Character.Avatar.Avatar;
 
 namespace NpcFace
 {
-    [PluginConfig(pluginName: "NpcFace", creatorId: "atakhalo", pluginVersion: "0.3.0.3")]
+    [PluginConfig(pluginName: "NpcFace", creatorId: "atakhalo", pluginVersion: "0.3.0.4")]
     public class NpcFaceFrontendPlugin : TaiwuRemakePlugin
     {
         private Harmony harmony;
@@ -341,15 +341,13 @@ namespace NpcFace
                 var taiwuDisplayName = SingletonObject.getInstance<BasicGameData>().TaiwuDisplayName;
                 if (curName == taiwuDisplayName)
                 {
-                    resLoad(avatar, instance, isTaiwu: true);
-                    return true;
+                    return resLoad(avatar, instance, isTaiwu: true);
                 }
                 else
                 {
                     if (npcRes.ContainsKey(curName))
                     { 
-                        resLoad(avatar, instance, isTaiwu: false, npcRes[curName]); 
-                        return true;
+                        return resLoad(avatar, instance, isTaiwu: false, npcRes[curName]); 
                     }
                     else
                     {
@@ -362,17 +360,18 @@ namespace NpcFace
             return false;
         }
 
-        public static void TrySetNpcFaceByName(TaiwuAvatar avatar, CharacterAvatar? instance, CharacterDisplayData displayData)
+        public static bool TrySetNpcFaceByName(TaiwuAvatar avatar, CharacterAvatar? instance, CharacterDisplayData displayData)
         {
             //MyLog($"TrySetNpcFaceByName displayData  {avatar}");
-            if (avatar == null) return;
+            if (avatar == null) return false;
             string curName = NameCenter.GetMonasticTitleOrDisplayName(displayData, isTaiwu: false);
             if (curName != "")
             {
                 //MyLog($"TrySetNpcFaceByName 找到名字 {curName}");
                 if (npcRes.ContainsKey(curName))
-                    resLoad(avatar, instance, isTaiwu: false, npcRes[curName]);
+                    return resLoad(avatar, instance, isTaiwu: false, npcRes[curName]);
             }
+            return false;
         }
 
         public static string TryFindName(Transform transform, int maxUp)
@@ -554,15 +553,15 @@ namespace NpcFace
             //MyLog($"FillElementPost 6-1");
         }
 
-        private static void resLoad(TaiwuAvatar avatar, CharacterAvatar? instance, bool isTaiwu, string res=null)
+        private static bool resLoad(TaiwuAvatar avatar, CharacterAvatar? instance, bool isTaiwu, string res=null)
         {
             //MyLog($"LoadModOrGameResource 0 ");
-            if (!npcFace) return;
-            if (isTaiwu && !forTaiwu) return;
-            if (!isTaiwu && !forNpc) return;
+            if (!npcFace) return false;
+            if (isTaiwu && !forTaiwu) return false;
+            if (!isTaiwu && !forNpc) return false;
 
             //MyLog($"LoadModOrGameResource 1 ");
-            if (avatar == null) return;
+            if (avatar == null) return false;
             //MyLog($"LoadModOrGameResource 2");
 
             var avatarAssetName = "NpcFace_yingjiao";
@@ -570,7 +569,7 @@ namespace NpcFace
             {
                 if (customNpc)
                 {
-                    if (string.IsNullOrEmpty(npcNameCustom)) return;
+                    if (string.IsNullOrEmpty(npcNameCustom)) return false;
                     avatarAssetName = npcNameCustom;
 
                 }
@@ -583,14 +582,14 @@ namespace NpcFace
             {
                 //MyLog($"LoadModOrGameResource 3");
 
-                if (string.IsNullOrEmpty(res)) return;
+                if (string.IsNullOrEmpty(res)) return false;
                 avatarAssetName = res;
             }
             //MyLog($"LoadModOrGameResource 4");
 
 
             var loadMod = GetResPath(avatarAssetName, avatar.Size, out var resPath);
-            if (string.IsNullOrEmpty(resPath)) return;// 报错出来
+            if (string.IsNullOrEmpty(resPath)) return false;// 报错出来
             //MyLog($"load {resPath}");
             //MyLog($"LoadModOrGameResource");
 
@@ -607,14 +606,16 @@ namespace NpcFace
                     instance.OnFillAvatar?.Invoke();
                 }, (tex) => {
                 });
+                return true;
             }
             else
             {
                 var tex = TryLoadImg(resPath);
-                if(tex == null) return;
+                if(tex == null) return false;
                 avatar.Refresh(tex);
-                if (instance == null) return;
+                if (instance == null) return true; // 上面已经替换成功了，这里只是检查是否要回调
                 instance.OnFillAvatar?.Invoke();
+                return true;
             }
         }
 
