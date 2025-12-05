@@ -8,6 +8,8 @@ using GameData.Domains.Extra;
 using GameData.Domains.Item;
 using GameData.Domains.Mod;
 using GameData.Domains.Taiwu;
+using GameData.Domains.Taiwu.Debate;
+using GameData.Domains.World.Notification;
 using GameData.GameDataBridge;
 using GameData.Serializer;
 using GameData.Utilities;
@@ -27,6 +29,7 @@ namespace MinutiaeBackend
         private Harmony harmony;
         public static bool noPenalty; // 开关 取消宴堂惩罚
         public static bool skipFinish = true; // 开关 战斗读书不读已完的书
+        public static bool toLoop = true; // 开关 修复较艺周天
 
         private static readonly Logger logger = LogManager.GetCurrentClassLogger();
         
@@ -48,6 +51,7 @@ namespace MinutiaeBackend
         {
             DomainManager.Mod.GetSetting(ModIdStr, "noPenalty", ref noPenalty);
             DomainManager.Mod.GetSetting(ModIdStr, "skipFinish", ref skipFinish);
+            DomainManager.Mod.GetSetting(ModIdStr, "toLoop", ref toLoop);
         }
 
         [HarmonyPrefix, HarmonyPatch(typeof(ExtraDomain), "FeastEmptyPenalty")]
@@ -210,6 +214,43 @@ namespace MinutiaeBackend
             {
                 return true;
             }
+        }
+        #endregion
+
+        #region 较艺触发周天
+        [HarmonyPostfix, HarmonyPatch(typeof(TaiwuDomain), "DebateGameOver")]
+        public static void DebateGameOver(TaiwuDomain __instance, DataContext context, bool isTaiwuWin, bool isSurrender,
+            ref DebateResult __result)
+        {
+            if (!toLoop) return;
+            //logger.Info("[Minutiae] DebateGameOver");
+            var result = __result;
+            Character _taiwuChar = Traverse.Create(__instance).Field("_taiwuChar").GetValue<Character>();
+            Character _debateNpc = Traverse.Create(__instance).Field("_debateNpc").GetValue<Character>();
+            sbyte taiwuConsummateLevel = _taiwuChar.GetConsummateLevel();
+            sbyte npcConsummateLevel = _debateNpc.GetConsummateLevel();
+
+            sbyte loopInLifeSkillCombatCount = DomainManager.Extra.GetLoopInLifeSkillCombatCount();
+            short loopingNeigongTemplateId = _taiwuChar.GetLoopingNeigong();
+            CombatSkillKey skillKey = new CombatSkillKey(_taiwuChar.GetId(), loopingNeigongTemplateId);
+            int chanceLooping = (int)(40 + (npcConsummateLevel - taiwuConsummateLevel) * 10);
+            chanceLooping += result.LoopRate;
+            GameData.Domains.CombatSkill.CombatSkill skill;
+            bool flag9 = loopInLifeSkillCombatCount > 0 && loopingNeigongTemplateId >= 0
+                && DomainManager.CombatSkill.TryGetElement_CombatSkills(skillKey, out skill) 
+                && skill.GetObtainedNeili() < skill.GetTotalObtainableNeili() // >= 改为 <
+                && context.Random.CheckPercentProb(chanceLooping);
+            if (flag9)
+            {
+                //logger.Info("[Minutiae] DebateGameOver true");
+                DomainManager.Extra.SetLoopInLifeSkillCombatCount((sbyte)(loopInLifeSkillCombatCount - 1), context);
+                __instance.ApplyNeigongLoopingImprovementOnce(context, 100);
+                result.ShowLoopingEvent = true;
+                result.ShowLoopingEvent2 = __instance.TryAddLoopingEvent(context, chanceLooping);
+                InstantNotificationCollection instantCollection = DomainManager.World.GetInstantNotificationCollection();
+                instantCollection.AddQiArtInLifeSkillCombatNoChance(loopingNeigongTemplateId);
+            }
+            //logger.Info("[Minutiae] DebateGameOver false");
         }
         #endregion
     }

@@ -18,6 +18,7 @@ using GameData.Utilities;
 using HarmonyLib;
 using HarmonyLib.Tools;
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
