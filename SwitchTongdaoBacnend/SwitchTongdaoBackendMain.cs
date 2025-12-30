@@ -13,6 +13,7 @@ using GameData.Serializer;
 using GameData.Utilities;
 using HarmonyLib;
 using NLog;
+using NLog.Fluent;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -20,21 +21,25 @@ using System.Linq;
 using System.Reflection;
 using TaiwuModdingLib.Core.Plugin;
 
-namespace MinutiaeBackend
+namespace SwitchTongdaoBackend
 {
 
-    [PluginConfig(pluginName: "SwitchTongdao", creatorId: "atakhalo", pluginVersion: "2025.10.15.1")]
+    [PluginConfig(pluginName: "SwitchTongdao", creatorId: "atakhalo", pluginVersion: "2025.12.30.1")]
     public class SwitchTongdaoPlugin : TaiwuRemakePlugin
     {
         private Harmony harmony;
         private static readonly Logger logger = LogManager.GetCurrentClassLogger();
         
         public static bool switchTongdao; // 开关
-        public static int command1; // 指令
-        public static int command2; // 指令
-        public static int command3; // 指令
-        public static int[] commands = new[] { 3, 4, 5}; // 开关
-        public static bool quickEmpty; // 开关 一键留空
+		public static bool justAllow; // 开关 允许同道战斗时生效
+		public static bool quickEmpty; // 开关 一键留空
+		public static bool noKillEmpty; // 开关 非死斗留空
+
+        private static bool toEmpty; // 留空
+
+		// 每个同道的3个指令， 第一层同道，第二层指令
+		// 01 作为特殊值，用于玩家设置输入；会在判断的时候减掉
+		public static List<List<int>> allCommands = new(){new(){ 3, 4, 5 }, new(){ 3, 4, 5 }, new(){ 3, 4, 5 } }; 
 
         private static HashSet<int> haveAddCharIds = new(3); // 记录已经安排上的同道
 
@@ -58,42 +63,59 @@ namespace MinutiaeBackend
         {
             DomainManager.Mod.GetSetting(ModIdStr, "switchTongdao", ref switchTongdao);
             DomainManager.Mod.GetSetting(ModIdStr, "quickEmpty", ref quickEmpty);
-            DomainManager.Mod.GetSetting(ModIdStr, "command1", ref commands[0]);
-            DomainManager.Mod.GetSetting(ModIdStr, "command2", ref commands[1]);
-            DomainManager.Mod.GetSetting(ModIdStr, "command3", ref commands[2]);
-        }
+            DomainManager.Mod.GetSetting(ModIdStr, "justAllow", ref justAllow);
+			DomainManager.Mod.GetSetting(ModIdStr, "noKillEmpty", ref noKillEmpty);
+
+			// 处理指令值的时候会把前面的特殊选项减掉
+			int temp = 3;
+            DomainManager.Mod.GetSetting(ModIdStr, "command1", ref temp); allCommands[0][0] = temp;
+            DomainManager.Mod.GetSetting(ModIdStr, "command1_2", ref temp); allCommands[0][1] = temp;
+            DomainManager.Mod.GetSetting(ModIdStr, "command1_3", ref temp); allCommands[0][2] = temp;
+            DomainManager.Mod.GetSetting(ModIdStr, "command2", ref temp); allCommands[1][0] = temp;
+            DomainManager.Mod.GetSetting(ModIdStr, "command2_2", ref temp); allCommands[1][1] = temp;
+			DomainManager.Mod.GetSetting(ModIdStr, "command2_3", ref temp); allCommands[1][2] = temp;
+			DomainManager.Mod.GetSetting(ModIdStr, "command3", ref temp); allCommands[2][0] = temp;
+			DomainManager.Mod.GetSetting(ModIdStr, "command3_2", ref temp); allCommands[2][1] = temp;
+			DomainManager.Mod.GetSetting(ModIdStr, "command3_3", ref temp); allCommands[2][2] = temp;
+		}
 
         [HarmonyPrefix, HarmonyPatch(typeof(CombatDomain), "CombatEntry")]
-        public static void OnCombatEntry(DataContext context)
+        public static void OnCombatEntry(DataContext context, short combatConfigTemplateId)
         {
-            if(switchTongdao)
-            {
-                haveAddCharIds.Clear(); // 清空
-                combatGroupCharIds.Clear();
+			if(!switchTongdao) return;
+            toEmpty = false;
+            var config = Config.CombatConfig.Instance[combatConfigTemplateId];
+            // 仅允许同道上场的战斗才生效
+            // logger.Info($"[SwitchTongdao] 是否允许同道 {config.AllowGroupMember}");
+			if(justAllow && !config.AllowGroupMember) return;
+            // 非死斗留空
+            if (noKillEmpty && config.CombatType != 2) { toEmpty = true; }
 
-                // 先把当前的存起来
-                var origin = Traverse.Create(DomainManager.Taiwu).Field("_combatGroupCharIds").GetValue<int[]>();
-                combatGroupCharIds.AddRange(origin);
-                // 处理跳过
-                haveAddCharIds.Add(DomainManager.Taiwu.GetTaiwuCharId()); // 跳过太吾
-                PreSetChar(context);
+			haveAddCharIds.Clear(); // 清空
+			combatGroupCharIds.Clear();
 
-                var groupCharIds = DomainManager.Taiwu.GetGroupCharIds();
-                TrySetChar(context, groupCharIds, 0);
-                TrySetChar(context, groupCharIds, 1);
-                TrySetChar(context, groupCharIds, 2);
-                haveAddCharIds.Clear(); // 清空
-            }
+			// 先把当前的同道存起来, 用于战后恢复
+			var origin = Traverse.Create(DomainManager.Taiwu).Field("_combatGroupCharIds").GetValue<int[]>();
+			combatGroupCharIds.AddRange(origin);
+			// 处理跳过
+			haveAddCharIds.Add(DomainManager.Taiwu.GetTaiwuCharId()); // 跳过太吾
+			PreSetChar(context); // 跳过第一个指令填“留空”的同道
+
+			var groupCharIds = DomainManager.Taiwu.GetGroupCharIds();
+			TrySetChar(context, groupCharIds, 0);
+			TrySetChar(context, groupCharIds, 1);
+			TrySetChar(context, groupCharIds, 2);
+			haveAddCharIds.Clear(); // 清空
         }
 
         // 先处理不替换，加入跳过人物
         public static void PreSetChar(DataContext context)
         {
-            for (int i = 0; i < commands.Length; i++)
+            for (int i = 0; i < allCommands.Count; i++)
             {
-                if (commands[i] == 1)
+                if (allCommands[i][0] == 1) // 仅处理第一个指令
                 {
-                    var charId = combatGroupCharIds[i];
+                    var charId = combatGroupCharIds[i];// 判断原来是否为空，否则将原来的人物标记已加，防止重复
                     if (charId != -1)
                     {
                         haveAddCharIds.Add(charId);
@@ -104,19 +126,19 @@ namespace MinutiaeBackend
 
         public static void TrySetChar(DataContext context, CharacterSet groupCharIds, int index)
         {
-            if(quickEmpty || commands[index] == 0) // 留空
+            if(quickEmpty || toEmpty || allCommands[index][0] == 0) // 留空
             {
                 DomainManager.Taiwu.SetElement_CombatGroupCharIds(index, -1, context);
                 //logger.Info($"[SwitchTongdao] Entry {index} set char emtpy");
 
             }
-            else if(commands[index] == 1) // 不替换
+            else if(allCommands[index][0] == 1) // 不替换
             {
                 //logger.Info($"[SwitchTongdao] Entry {index} not set char");
             }
             else
             {
-                var charId = FindChar(groupCharIds, index);
+                var charId = FindChar(groupCharIds, index); // 尝试寻找指令同道，有则标记已加并设置
                 //logger.Info($"[SwitchTongdao] Entry {index} set char to {charId}");
                 if (charId != -1)
                 {
@@ -147,15 +169,23 @@ namespace MinutiaeBackend
                     .Field("_charTeammateCommandDict").GetValue<Dictionary<int, SByteList>>();
                 if(_charTeammateCommandDict.ContainsKey(charid))
                 {
-                    if (_charTeammateCommandDict[charid].Items.Contains((sbyte)(commands[index] - 2)))
-                    {
-                        //logger.Info($"[SwitchTongdao] FindChar {index} char {charid}");
-                        return charid;
-                    }
-                    else
-                    {
-                        //logger.Info($"[SwitchTongdao] FindChar {index}  no find");
-                    }
+					var charCommand = _charTeammateCommandDict[charid].Items;
+					var r = false;
+					if(charCommand.Contains((sbyte)(allCommands[index][0] - 2))) // 匹配第一个
+					{
+						r = true;
+						if(allCommands[index][1] >= 2 
+							&& !charCommand.Contains((sbyte)(allCommands[index][1] - 2))) // 第二个不是 01，且不满足
+						{
+							r = false;
+						}
+						if (allCommands[index][2] >= 2
+							&& !charCommand.Contains((sbyte)(allCommands[index][2] - 2))) // 第三个不是 01，且不满足
+						{
+							r = false;
+						}
+					}
+					if(r) return charid;
                 }
                 else
                 {
