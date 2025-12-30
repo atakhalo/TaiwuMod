@@ -138,7 +138,15 @@ namespace SwitchTongdaoBackend
             }
             else
             {
-                var charId = FindChar(groupCharIds, index); // 尝试寻找指令同道，有则标记已加并设置
+                var charId = -1;
+                try
+                {
+                    charId = FindChar(groupCharIds, index); // 尝试寻找指令同道，有则标记已加并设置
+                }
+                catch (Exception e)
+                {
+                    logger.Info($"[SwitchTongdao] bug");
+                }
                 //logger.Info($"[SwitchTongdao] Entry {index} set char to {charId}");
                 if (charId != -1)
                 {
@@ -157,21 +165,20 @@ namespace SwitchTongdaoBackend
         {
             var group =  groupCharIds.GetCollection();
             int i = 0;
+            var _charTeammateCommandDict = Traverse.Create(DomainManager.Extra)
+                .Field("_charTeammateCommandDict").GetValue<Dictionary<int, SByteList>>();
             foreach (var charid in group)
             {
                 if(haveAddCharIds.Contains(charid)) // 跳过已经加过的
                 {
                     continue;
                 }
-
-                var character = DomainManager.Character.GetElement_Objects(charid);
-                var _charTeammateCommandDict = Traverse.Create(DomainManager.Extra)
-                    .Field("_charTeammateCommandDict").GetValue<Dictionary<int, SByteList>>();
-                if(_charTeammateCommandDict.ContainsKey(charid))
+                if (_charTeammateCommandDict.ContainsKey(charid))
                 {
 					var charCommand = _charTeammateCommandDict[charid].Items;
+                    if (charCommand == null || charCommand.Count == 0) continue;
 					var r = false;
-					if(charCommand.Contains((sbyte)(allCommands[index][0] - 2))) // 匹配第一个
+                    if (charCommand.Contains((sbyte)(allCommands[index][0] - 2))) // 匹配第一个
 					{
 						r = true;
 						if(allCommands[index][1] >= 2 
