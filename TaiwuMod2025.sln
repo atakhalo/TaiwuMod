@@ -25,6 +25,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WinBetterFrontend", "WinBet
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WeightAnalyzeFrontend", "WeightAnalyzeFrontend\WeightAnalyzeFrontend.csproj", "{C2D1A359-8F5D-2FB8-3AB5-98604F7490AE}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "EquipTypeFrontend", "EquipTypeFrontend\EquipTypeFrontend.csproj", "{5BF9B854-53DD-234A-9679-6C7D07678992}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -75,6 +77,10 @@ Global
 		{C2D1A359-8F5D-2FB8-3AB5-98604F7490AE}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{C2D1A359-8F5D-2FB8-3AB5-98604F7490AE}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{C2D1A359-8F5D-2FB8-3AB5-98604F7490AE}.Release|Any CPU.Build.0 = Release|Any CPU
+		{5BF9B854-53DD-234A-9679-6C7D07678992}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{5BF9B854-53DD-234A-9679-6C7D07678992}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{5BF9B854-53DD-234A-9679-6C7D07678992}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{5BF9B854-53DD-234A-9679-6C7D07678992}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
