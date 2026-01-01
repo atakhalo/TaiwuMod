@@ -146,6 +146,7 @@ namespace Minutiae
         public static bool quickShop = true; // 开关 快速打开商店界面
         public static bool noLimitShop = false; // 开关 不受距离限制
         public static bool blockShop = true; // 开关 商队页显示商人
+        public static bool tongdaoShop = true; // 开关 同道商人快速打开商店
 
         public override void Initialize()
         {
@@ -178,6 +179,7 @@ namespace Minutiae
             ModManager.GetSetting(ModIdStr, "quickShop", ref quickShop);
             ModManager.GetSetting(ModIdStr, "noLimitShop", ref noLimitShop);
             ModManager.GetSetting(ModIdStr, "blockShop", ref blockShop);
+            ModManager.GetSetting(ModIdStr, "tongdaoShop", ref tongdaoShop);
             MyUtils.MyLog($"setting {hideEquiped}, {noLimit}, {lockCore} {showEfficiency}, " +
                 $"{restFilter}, {selectAllEnable}, {sortZizhi}, {showZizhi}");
         }
@@ -1000,6 +1002,10 @@ namespace Minutiae
 
             // 可看 EventHelper.StartMerchantAction
             var charId = Traverse.Create(__instance).Field("CharId").GetValue<int>();
+            OpenCharShopHelper(charId);
+        }
+        private static void OpenCharShopHelper(int charId)
+        {
             OpenShopEventArguments openShopEventArguments = new OpenShopEventArguments
             {
                 Id = charId,
@@ -1009,6 +1015,7 @@ namespace Minutiae
             UIElement.Shop.SetOnInitArgs(args);
             UIManager.Instance.ShowUI(UIElement.Shop);
         }
+
         public static void OpenCaravan(MapBlockCharBase __instance, int caravanId)
         {
             //MyUtils.MyLog("点了 OpenCaravan");
@@ -1039,7 +1046,81 @@ namespace Minutiae
                 return  false;
             }
         }
+        // 在同道快捷界面增加商店按钮
+        [HarmonyPostfix, HarmonyPatch(typeof(UI_Bottom), "UpdateCombatTeammate", argumentTypes: new Type[2] { typeof(int), typeof(int) })]
+        public static void UpdateCombatTeammate(UI_Bottom __instance, int index, int charId)
+        {
+            //MyUtils.MyLog("UpdateCombatTeammate");
+            var _groupChar = Traverse.Create(__instance).Field("_groupChar").GetValue<Refers>();
+            RectTransform rootSlot = _groupChar.CGet<RectTransform>("CombatCharHolder");
+            Refers panel = rootSlot.Find(index.ToString()).GetComponent<Refers>();
+            TriggerPanel triggerPanel = panel.CGet<TriggerPanel>("MenuBg");
 
+            Traverse.Create(triggerPanel).Field("_isInited").SetValue(false);
+            triggerPanel.Init(new Func<bool>(CheckCanEnterPanel), () => OnPanelShow(index, charId, triggerPanel));
+        }
+        private static bool CheckCanEnterPanel()
+        {
+            return !WorldMapModel.Traveling && !UIElement.PartWorld.Exist;
+        }
+        private static void OnPanelShow(int index, int charId, TriggerPanel triggerPanel)
+        {
+            //MyUtils.MyLog("OnPanelShow");
+            bool show = false;
+            if (tongdaoShop)
+            {
+                var __instance = UIElement.Bottom.UiBaseAs<UI_Bottom>();
+                var datas = Traverse.Create(__instance).Field("_charDisplayDataDict").GetValue<Dictionary<int, CharacterDisplayData>>();
+                if (datas.ContainsKey(charId) && IsMerchantShow(datas[charId]))
+                {
+                    show = true;
+                }
+            }
+            if (show)
+            {
+                //MyUtils.MyLog("OnPanelShow show");
+                triggerPanel.GetComponent<RectTransform>().sizeDelta = new Vector2(369, 144);
+                var btnChat = triggerPanel.transform.GetChild(0);
+                btnChat.GetComponent<RectTransform>().anchoredPosition = new Vector2(-120f, 20.4f);
+                var btnChange = triggerPanel.transform.GetChild(1);
+                btnChange.GetComponent<RectTransform>().anchoredPosition = new Vector2(0f, 20.4f);
+
+                if (triggerPanel.transform.childCount > 2)
+                {
+                    var btn = triggerPanel.transform.GetChild(2);
+                    btn.gameObject.SetActive(true);
+                    btn.GetComponent<Button>().onClick.RemoveAllListeners();
+                    btn.GetComponent<Button>().onClick.AddListener(() => OnClickMateShop(charId));
+                }
+                else
+                {
+                    var btnShop = GameObject.Instantiate(btnChat, btnChange.parent);
+                    btnShop.GetComponent<RectTransform>().anchoredPosition = new Vector2(120f, 20.4f);
+                    btnShop.GetComponent<Button>().onClick.AddListener(() => OnClickMateShop(charId));
+                    btnShop.name = "btnShop";
+                    btnShop.GetComponentInChildren<TextLanguage>().Key = "LK_Shop";
+                }
+            }
+            else
+            {
+                triggerPanel.GetComponent<RectTransform>().sizeDelta = new Vector2(249, 144); // 恢复原大小
+                var btnChat = triggerPanel.transform.GetChild(0);
+                btnChat.GetComponent<RectTransform>().anchoredPosition = new Vector2(-60f, 20.4f);
+                var btnChange = triggerPanel.transform.GetChild(1);
+                btnChange.GetComponent<RectTransform>().anchoredPosition = new Vector2(60f, 20.4f);
+
+                if (triggerPanel.transform.childCount > 2)
+                {
+                    var btn = triggerPanel.transform.GetChild(2);
+                    btn.gameObject.SetActive(false);
+                }
+            }
+        }
+
+        private static void OnClickMateShop(int charId)
+        {
+            OpenCharShopHelper(charId);
+        }
 
         #endregion
         #region 商队页显示商人
