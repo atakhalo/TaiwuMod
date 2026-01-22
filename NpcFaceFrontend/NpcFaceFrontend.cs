@@ -175,7 +175,7 @@ namespace NpcFace
             //tagDirs.Clear();
             foreach (ModId mod in ModManager.EnabledMods)
             {
-                ModInfoWithDisplayData modInfo = ModManager.GetModInfo(mod);
+                ModInfo modInfo = ModManager.GetModInfo(mod);
                 var configPath = Path.Combine(modInfo.DirectoryName, "TaiwuYingjiao.txt");
                 if (!File.Exists(configPath)) continue;
                 var s = File.ReadAllLines(configPath, System.Text.Encoding.UTF8);

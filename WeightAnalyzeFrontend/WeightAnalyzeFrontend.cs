@@ -1,4 +1,8 @@
-﻿using CharacterDataMonitor;
+﻿//#define taiwuNormal
+#define taiwuTest
+
+
+using CharacterDataMonitor;
 using Config;
 using FrameWork;
 using FrameWork.ModSystem;
@@ -37,6 +41,7 @@ using UnityEngine.UI;
 //using static FrameWork.AspectRatio.PlatformSpecific.Win32AspectRatioLock;
 //using static GameData.Domains.Item.ItemOperationType;
 //using static TMPro.SpriteAssetUtilities.TexturePacker_JsonArray;
+
 
 
 namespace WeightAnalyze
@@ -194,54 +199,66 @@ namespace WeightAnalyze
         private static Dictionary<int, TypeWeight> treasuryWeights = new Dictionary<int, TypeWeight>();
         private static Dictionary<int, TypeWeight> stockWeights = new Dictionary<int, TypeWeight>();
 
+#if taiwuNormal
+        private static string ToLoc(ushort languageKey)
+        {
+            return LocalStringManager.Get((ushort)languageKey);
+        }
+#else
+        private static string ToLoc(LanguageKey languageKey)
+        {
+            return LocalStringManager.Get(languageKey);
+        }
+#endif
+
         private static SortedDictionary<int, string> equipFilterName = new SortedDictionary<int, string>()
         {
-            { 1, LocalStringManager.Get(LanguageKey.LK_Equip_Slot_Name_Short_Weapon) },
-            { 3, LocalStringManager.Get(LanguageKey.LK_Equip_Slot_Name_Short_Torso) },
+            { 1, ToLoc(LanguageKey.LK_Equip_Slot_Name_Short_Weapon) },
+            { 3, ToLoc(LanguageKey.LK_Equip_Slot_Name_Short_Torso) },
         };
         private static SortedDictionary<int, string> resFilterName = new SortedDictionary<int, string>()
         {
-            { 1, LocalStringManager.Get(LanguageKey.LK_Item_Filter_SubType_Material_Food) },
-            { 2, LocalStringManager.Get(LanguageKey.LK_Item_Filter_SubType_Material_Wood) },
-            { 3, LocalStringManager.Get(LanguageKey.LK_Item_Filter_SubType_Material_Metal) },
-            { 4, LocalStringManager.Get(LanguageKey.LK_Item_Filter_SubType_Material_Jade) },
-            { 5, LocalStringManager.Get(LanguageKey.LK_Item_Filter_SubType_Material_Fabric) },
-            { 6, LocalStringManager.Get(LanguageKey.LK_Item_Filter_SubType_Material_Medicine) },
+            { 1, ToLoc(LanguageKey.LK_Item_Filter_SubType_Material_Food) },
+            { 2, ToLoc(LanguageKey.LK_Item_Filter_SubType_Material_Wood) },
+            { 3, ToLoc(LanguageKey.LK_Item_Filter_SubType_Material_Metal) },
+            { 4, ToLoc(LanguageKey.LK_Item_Filter_SubType_Material_Jade) },
+            { 5, ToLoc(LanguageKey.LK_Item_Filter_SubType_Material_Fabric) },
+            { 6, ToLoc(LanguageKey.LK_Item_Filter_SubType_Material_Medicine) },
         };
 
         private static SortedDictionary<int, string> foodTypeName = new SortedDictionary<int, string>()
         { 
             // 菜
-            { 700, LocalStringManager.Get(LanguageKey.LK_Item_Filter_SubType_Food_Vegetarian) },
-            { 701, LocalStringManager.Get(LanguageKey.LK_Item_Filter_SubType_Food_Meat) },
-            { 900, LocalStringManager.Get(LanguageKey.LK_Item_Filter_SubType_Food_Tea) },
-            { 901, LocalStringManager.Get(LanguageKey.LK_Item_Filter_SubType_Food_Wine) },
+            { 700, ToLoc(LanguageKey.LK_Item_Filter_SubType_Food_Vegetarian) },
+            { 701, ToLoc(LanguageKey.LK_Item_Filter_SubType_Food_Meat) },
+            { 900, ToLoc(LanguageKey.LK_Item_Filter_SubType_Food_Tea) },
+            { 901, ToLoc(LanguageKey.LK_Item_Filter_SubType_Food_Wine) },
         };
         private static SortedDictionary<int, string> bookTypeName = new SortedDictionary<int, string>()
         { 
             // 书
-            { 1000, LocalStringManager.Get(LanguageKey.LK_Item_Filter_SubType_Book_LifeSkill) },
-            { 1001, LocalStringManager.Get(LanguageKey.LK_Item_Filter_SubType_Book_CombatSkill) },
+            { 1000, ToLoc(LanguageKey.LK_Item_Filter_SubType_Book_LifeSkill) },
+            { 1001, ToLoc(LanguageKey.LK_Item_Filter_SubType_Book_CombatSkill) },
         };
 
         private static SortedDictionary<int, string> miscTypeName = new SortedDictionary<int, string>()
         {
             // 其他 心
-            { 1100, LocalStringManager.Get(LanguageKey.LK_ItemSubType_1100) },
-            { 1200, LocalStringManager.Get(LanguageKey.LK_ItemSubType_1200) },
-            { 1205, LocalStringManager.Get(LanguageKey.LK_ItemSubType_1205) },
-            { 1206, LocalStringManager.Get(LanguageKey.LK_ItemSubType_1206) },
+            { 1100, ToLoc(LanguageKey.LK_ItemSubType_1100) },
+            { 1200, ToLoc(LanguageKey.LK_ItemSubType_1200) },
+            { 1205, ToLoc(LanguageKey.LK_ItemSubType_1205) },
+            { 1206, ToLoc(LanguageKey.LK_ItemSubType_1206) },
         };
 
         private static SortedDictionary<int, (SortedDictionary<int, string> sub, string name)> filterName = new SortedDictionary<int, (SortedDictionary<int, string> sub, string name)>()
         {
-            { 1, (foodTypeName, LocalStringManager.Get(LanguageKey.LK_Item_Filter_Type_Food)) }, // itemtype 7 9
-            { 2, (null, LocalStringManager.Get(LanguageKey.LK_Item_Filter_Type_Medicine)) }, // itemtype 8
-            { 3, (equipFilterName, LocalStringManager.Get(LanguageKey.LK_Item_Filter_Type_Equipment)) }, // itemtype 01234
-            { 4, (bookTypeName, LocalStringManager.Get(LanguageKey.LK_Item_Filter_Type_Book)) },  // itemtype 10
-            { 5, (null, LocalStringManager.Get(LanguageKey.LK_Item_Filter_Type_Make)) }, //  itemtype 6
-            { 6, (resFilterName, LocalStringManager.Get(LanguageKey.LK_Item_Filter_Type_Material)) },  // itemtype 5
-            { 7, (miscTypeName, LocalStringManager.Get(LanguageKey.LK_Item_Filter_Type_Other)) },  // itemtype 大于10 其他 12
+            { 1, (foodTypeName, ToLoc(LanguageKey.LK_Item_Filter_Type_Food)) }, // itemtype 7 9
+            { 2, (null, ToLoc(LanguageKey.LK_Item_Filter_Type_Medicine)) }, // itemtype 8
+            { 3, (equipFilterName, ToLoc(LanguageKey.LK_Item_Filter_Type_Equipment)) }, // itemtype 01234
+            { 4, (bookTypeName, ToLoc(LanguageKey.LK_Item_Filter_Type_Book)) },  // itemtype 10
+            { 5, (null, ToLoc(LanguageKey.LK_Item_Filter_Type_Make)) }, //  itemtype 6
+            { 6, (resFilterName, ToLoc(LanguageKey.LK_Item_Filter_Type_Material)) },  // itemtype 5
+            { 7, (miscTypeName, ToLoc(LanguageKey.LK_Item_Filter_Type_Other)) },  // itemtype 大于10 其他 12
         };
         private static List<int> filterSort = new List<int>() { 1, 2, 3, 4, 6, 5, 7 };
 
@@ -380,7 +397,7 @@ namespace WeightAnalyze
         private static void UpdateInventoryLoad(UI_Warehouse __instance)
         {
             var _inventoryScroll = Traverse.Create(__instance).Field("_inventoryScroll").GetValue<ItemScrollView>();
-            var sp = LocalStringManager.Get(LanguageKey.LK_Colon_Symbol);
+            var sp = ToLoc(LanguageKey.LK_Colon_Symbol);
             if (!curWeight)
             {
                 var origin = __instance.CGet<TextMeshProUGUI>("InventoryLoadTips").text;
@@ -400,7 +417,7 @@ namespace WeightAnalyze
         private static void UpdateWareLoad(UI_Warehouse __instance)
         {
             var _warehouseScroll = Traverse.Create(__instance).Field("_warehouseScroll").GetValue<GroupedItemScrollView>();
-            var sp = LocalStringManager.Get(LanguageKey.LK_Colon_Symbol);
+            var sp = ToLoc(LanguageKey.LK_Colon_Symbol);
             if (!curWeight)
             {
                 var origin = __instance.CGet<TextMeshProUGUI>("WarehouseLoadTips").text;
@@ -431,7 +448,7 @@ namespace WeightAnalyze
             if (!weightAnalyze) return;
 
             var _itemDict = Traverse.Create(__instance).Field("_itemDict").GetValue<Dictionary<ItemSourceType, List<ItemDisplayData>>>();
-            var bagStr = UpdateSource(LocalStringManager.Get(LanguageKey.LK_Inventory), inventoryWeights, _itemDict[ItemSourceType.Inventory]);
+            var bagStr = UpdateSource(ToLoc(LanguageKey.LK_Inventory), inventoryWeights, _itemDict[ItemSourceType.Inventory]);
             inventoryText.text = bagStr;
             //MyUtils.MyLog(bagStr);
             //UpdateInventoryLoad(__instance);
@@ -445,12 +462,34 @@ namespace WeightAnalyze
             if (!weightAnalyze) return;
 
             var _itemDict = Traverse.Create(__instance).Field("_itemDict").GetValue<Dictionary<ItemSourceType, List<ItemDisplayData>>>();
-            var wareStr = UpdateSource(LocalStringManager.Get(LanguageKey.LK_Warehouse), warehouseWeights, _itemDict[ItemSourceType.Warehouse]);
-            var treasuryStr = UpdateSource(LocalStringManager.Get(LanguageKey.LK_Treasury), treasuryWeights, _itemDict[ItemSourceType.Treasury]);
-            var stockStr = UpdateSource(LocalStringManager.Get(LanguageKey.LK_StockStorageGoodsShelf), stockWeights, _itemDict[ItemSourceType.StockStorageGoodsShelf]);
-            warehouseText.text = wareStr;
-            treasuryText.text = treasuryStr;
-            stockText.text = stockStr;
+            if(_itemDict.ContainsKey(ItemSourceType.Warehouse))
+            {
+                var wareStr = UpdateSource(ToLoc(LanguageKey.LK_Warehouse), warehouseWeights, _itemDict[ItemSourceType.Warehouse]);
+                warehouseText.text = wareStr;
+            }
+            else
+                warehouseText.text = "";
+            if (_itemDict.ContainsKey(ItemSourceType.Treasury))
+            {
+                var treasuryStr = UpdateSource(ToLoc(LanguageKey.LK_Treasury), treasuryWeights, _itemDict[ItemSourceType.Treasury]);
+                treasuryText.text = treasuryStr;
+            }
+            else
+                treasuryText.text = "";
+            if(_itemDict.ContainsKey(ItemSourceType.StockStorageGoodsShelf))
+            {
+                var stockStr = UpdateSource(ToLoc(LanguageKey.LK_StockStorageGoodsShelf), stockWeights, _itemDict[ItemSourceType.StockStorageGoodsShelf]);
+                stockText.text = stockStr;
+            }
+            else if (_itemDict.ContainsKey(ItemSourceType.Trough))
+            {
+                var stockStr = UpdateSource(ToLoc(LanguageKey.LK_Trough), stockWeights, _itemDict[ItemSourceType.Trough]);
+                stockText.text = stockStr;
+            }
+            else
+            {
+                stockText.text = "";
+            }
             //MyUtils.MyLog(wareStr);
             //MyUtils.MyLog(treasuryStr);
             //MyUtils.MyLog(stockStr);

@@ -1,4 +1,7 @@
-﻿using CharacterDataMonitor;
+﻿//#define taiwuNormal
+//#define taiwuTest
+
+using CharacterDataMonitor;
 using Config;
 using Config.Common;
 using FrameWork;
