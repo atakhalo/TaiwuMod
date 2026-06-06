@@ -24,7 +24,7 @@ using TaiwuModdingLib.Core.Plugin;
 using TaiwuModdingLib.Core.Utils;
 using TMPro;
 using UICommon.Character;
-using UICommon.Character.Avatar;
+
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
@@ -251,8 +251,8 @@ namespace ArrowKey
         public static void StackBack(UIManager __instance) { if (isEnter) { ToExit(); } else { RelButton(); } }
         #endregion
 
-        [HarmonyPostfix, HarmonyPatch(typeof(Game), "Update")]
-        public static void GameUpdate(Game __instance)
+        [HarmonyPostfix, HarmonyPatch(typeof(GameApp), "Update")]
+        public static void GameUpdate(GameApp __instance)
         {
             if (!arrowKey) return;
             CheckEnter();
@@ -352,11 +352,33 @@ namespace ArrowKey
             rect.localScale = Vector3.one;
             rect.localPosition = Vector3.zero;
 
-            var tipsText = GameObjectCreationUtils.UGUICreateTMPText(tipsObj.transform, new Vector2(0.5f, 0.5f), new Vector2(30f, 30f), 100f, "V");
-            tipsText.name = "ArrowKeyTipsText";
-            tipsText.color = Color.red;
+			// 手动创建 TextMeshProUGUI（GameObjectCreationUtils 在游戏更新后被移除）
+			var tipsText = tipsObj.AddComponent<TextMeshProUGUI>();
+			tipsText.name = "ArrowKeyTipsText";
+			tipsText.text = "V";
+			tipsText.fontSize = 60f;
+			tipsText.alignment = TextAlignmentOptions.Center;
+			tipsText.color = Color.red;
+			// 从游戏现有 UI 文本中获取正确的字体（LiberationSans 在游戏中不存在）
+			// 使用 parent 所在 Canvas 下的文本来避免 DontDestroyOnLoad 场景问题
+			var canvas = parent.GetComponentInParent<Canvas>(true);
+			TextMeshProUGUI refText = null;
+			if (canvas != null)
+			{
+				refText = canvas.GetComponentInChildren<TextMeshProUGUI>(true);
+			}
+			if (refText == null || refText.font == null)
+			{
+				// 兜底：从 UIManager 所在根节点查找
+				refText = topUI.GetComponentInChildren<TextMeshProUGUI>(true);
+			}
+			if (refText != null && refText.font != null)
+			{
+				tipsText.font = refText.font;
+				// fontMaterial 的 getter 内部会复制材质，可能抛出异常，只设置 font 即可
+			}
 
-            MyUtils.MyLog($"CreateTipsText {rect.anchoredPosition}  {rect.localPosition} {rect.localScale}");
+			MyUtils.MyLog($"CreateTipsText {rect.anchoredPosition}  {rect.localPosition} {rect.localScale}");
         }
         public static void CycleTipsText()
         {

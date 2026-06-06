@@ -4,6 +4,8 @@
     <TargetFramework>netstandard2.1</TargetFramework>
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+	<OutputPath>C:\Program Files (x86)\Steam\steamapps\common\The Scroll Of Taiwu\Mod\键盘手柄模拟鼠标\Plugins\</OutputPath>
+	<AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
   </PropertyGroup>
 
   <ItemGroup>
