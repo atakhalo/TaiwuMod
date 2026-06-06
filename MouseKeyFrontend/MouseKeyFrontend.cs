@@ -25,7 +25,6 @@ using TaiwuModdingLib.Core.Plugin;
 using TaiwuModdingLib.Core.Utils;
 using TMPro;
 using UICommon.Character;
-using UICommon.Character.Avatar;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
@@ -40,7 +39,7 @@ namespace MouseKey
     {
         public static void MyLog(string log)
         {
-            //Debug.Log($"[MouseKey] {log}");
+            Debug.Log($"[MouseKey] {log}");
         }
 
         public static void ShowMonoCur(GameObject gameObject)
@@ -196,11 +195,11 @@ namespace MouseKey
             MyUtils.MyLog($"setting {mouseKey} {joystick}");
         }
 
-        [HarmonyPostfix, HarmonyPatch(typeof(Game), "Update")]
-        public static void GameUpdate(Game __instance)
+        [HarmonyPostfix, HarmonyPatch(typeof(GameApp), "Update")]
+        public static void GameUpdate(GameApp __instance)
         {
             if (!mouseKey) return;
-            CheckEnter();
+			CheckEnter();
             CheckMove();
             CheckClick();
             CheckScroll();
@@ -209,7 +208,7 @@ namespace MouseKey
         public static void CheckEnter()
         {
             //if (mode != 0) return;
-            var moveMode = (Input.GetKey(KeyCode.LeftControl) && Input.GetKeyDown(KeyCode.BackQuote));
+			var moveMode = (Input.GetKey(KeyCode.LeftControl) && Input.GetKeyDown(KeyCode.BackQuote));
             if(joystick) moveMode = moveMode || Input.GetKeyDown(KeyCode.JoystickButton6);
             var scrollMode = (Input.GetKey(KeyCode.LeftShift) && Input.GetKeyDown(KeyCode.BackQuote));
             if(joystick) scrollMode = scrollMode || Input.GetKeyDown(KeyCode.JoystickButton7);
@@ -288,17 +287,38 @@ namespace MouseKey
             rect.anchorMin = new Vector2(0.5f, 0f);
             rect.anchorMax = new Vector2(0.5f, 0f);
             rect.SetPivot(new Vector2(0.5f, 0f));
-            rect.sizeDelta = new Vector2(200, 100);
+            rect.sizeDelta = new Vector2(300, 100);
             // 归0
             rect.localRotation = Quaternion.identity;
             rect.localScale = Vector3.one;
             rect.localPosition = Vector3.zero;
             rect.anchoredPosition = Vector2.zero;
 
-            tipsText = GameObjectCreationUtils.UGUICreateTMPText(tipsObj.transform, new Vector2(0.5f, 0.5f), new Vector2(300f, 100f), 60f, "V");
+            // 手动创建 TextMeshProUGUI（GameObjectCreationUtils 在游戏更新后被移除）
+            tipsText = tipsObj.AddComponent<TextMeshProUGUI>();
             tipsText.name = "MouseKeyTipsText";
+            tipsText.text = "V";
+            tipsText.fontSize = 60f;
+            tipsText.alignment = TextAlignmentOptions.Center;
             tipsText.color = Color.red;
-
+            // 从游戏现有 UI 文本中获取正确的字体（LiberationSans 在游戏中不存在）
+            // 使用 parent 所在 Canvas 下的文本来避免 DontDestroyOnLoad 场景问题
+            var canvas = parent.GetComponentInParent<Canvas>(true);
+            TextMeshProUGUI refText = null;
+            if (canvas != null)
+            {
+                refText = canvas.GetComponentInChildren<TextMeshProUGUI>(true);
+            }
+            if (refText == null || refText.font == null)
+            {
+                // 兜底：从 UIManager 所在根节点查找
+                refText = topUI.GetComponentInChildren<TextMeshProUGUI>(true);
+            }
+            if (refText != null && refText.font != null)
+            {
+                tipsText.font = refText.font;
+                // fontMaterial 的 getter 内部会复制材质，可能抛出异常，只设置 font 即可
+            }
             MyUtils.MyLog($"CreateMouseKeyTipsText {rect.anchoredPosition}  {rect.localPosition} {rect.localScale}");
         }
         public static void CycleTipsText()
@@ -382,9 +402,9 @@ namespace MouseKey
             uint MOUSEEVENTF_RIGHTDOWN = 0x0008;
             uint MOUSEEVENTF_RIGHTUP = 0x0010;
 
-            var toClickDown = Input.GetKeyDown(KeyCode.LeftAlt);
+            var toClickDown = Input.GetKeyDown(KeyCode.BackQuote);
             if (joystick) toClickDown = toClickDown || Input.GetKeyDown(KeyCode.JoystickButton5);
-            var toClickUp = Input.GetKeyUp(KeyCode.LeftAlt);
+            var toClickUp = Input.GetKeyUp(KeyCode.BackQuote);
             if (joystick) toClickUp = toClickUp || Input.GetKeyUp(KeyCode.JoystickButton5);
 
             if (toClickDown)
