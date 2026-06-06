@@ -27,7 +27,7 @@ namespace SwitchTongdaoBackend
     [PluginConfig(pluginName: "SwitchTongdao", creatorId: "atakhalo", pluginVersion: "2025.12.30.1")]
     public class SwitchTongdaoPlugin : TaiwuRemakePlugin
     {
-        private Harmony harmony;
+        private Harmony? harmony;
         private static readonly Logger logger = LogManager.GetCurrentClassLogger();
         
         public static bool switchTongdao; // 开关
@@ -79,12 +79,12 @@ namespace SwitchTongdaoBackend
 			DomainManager.Mod.GetSetting(ModIdStr, "command3_3", ref temp); allCommands[2][2] = temp;
 		}
 
-        [HarmonyPrefix, HarmonyPatch(typeof(CombatDomain), "CombatEntry")]
-        public static void OnCombatEntry(DataContext context, short combatConfigTemplateId)
+        [HarmonyPrefix, HarmonyPatch(typeof(CombatDomain), "CombatEntry", argumentTypes: new Type[3] { typeof(DataContext), typeof(List<int>), typeof(short)})]
+        public static void OnCombatEntry(DataContext context, short combatConfigId)
         {
 			if(!switchTongdao) return;
             toEmpty = false;
-            var config = Config.CombatConfig.Instance[combatConfigTemplateId];
+            var config = Config.CombatConfig.Instance[combatConfigId];
             // 仅允许同道上场的战斗才生效
             // logger.Info($"[SwitchTongdao] 是否允许同道 {config.AllowGroupMember}");
 			if(justAllow && !config.AllowGroupMember) return;
@@ -143,7 +143,7 @@ namespace SwitchTongdaoBackend
                 {
                     charId = FindChar(groupCharIds, index); // 尝试寻找指令同道，有则标记已加并设置
                 }
-                catch (Exception e)
+                catch (Exception)
                 {
                     logger.Info($"[SwitchTongdao] bug");
                 }
@@ -164,7 +164,6 @@ namespace SwitchTongdaoBackend
         public static int FindChar(CharacterSet groupCharIds, int index)
         {
             var group =  groupCharIds.GetCollection();
-            int i = 0;
             var _charTeammateCommandDict = Traverse.Create(DomainManager.Extra)
                 .Field("_charTeammateCommandDict").GetValue<Dictionary<int, SByteList>>();
             foreach (var charid in group)
