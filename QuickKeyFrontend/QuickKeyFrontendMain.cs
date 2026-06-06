@@ -22,7 +22,6 @@ using TaiwuModdingLib.Core.Plugin;
 using TaiwuModdingLib.Core.Utils;
 using TMPro;
 using UICommon.Character;
-using UICommon.Character.Avatar;
 using UnityEngine;
 using UnityEngine.UI;
 using static GameData.Domains.Item.ItemOperationType;
@@ -194,10 +193,10 @@ namespace QuickKey
             }
         }
 
-        [HarmonyPostfix, HarmonyPatch(typeof(Game), "Update")]
-        public static void GameUpdate(Game __instance)
+        [HarmonyPostfix, HarmonyPatch(typeof(GameApp), "Update")]
+        public static void GameUpdate(GameApp __instance)
         {
-            if (Game.Instance.GetCurrentGameStateName() != EGameState.InGame)
+            if (GameApp.Instance.GetCurrentGameStateName() != EGameState.InGame)
                 return;
             if (!quickKeyEnable) return;
             if (!Input.anyKeyDown) return;

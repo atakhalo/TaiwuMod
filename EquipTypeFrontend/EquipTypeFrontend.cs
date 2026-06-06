@@ -33,7 +33,6 @@ using TaiwuModdingLib.Core.Plugin;
 using TaiwuModdingLib.Core.Utils;
 using TMPro;
 using UICommon.Character;
-using UICommon.Character.Avatar;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
@@ -56,7 +55,7 @@ namespace EquipType
         public static void DelayCall(Action action, float delay, bool real)
         {
             //Game.Instance.StartCoroutine(DelayCoroutine(TrySetNpcFace, 0, avatar, null, relatedData));
-            Game.Instance.StartCoroutine(DelayCoroutine(action, delay, real));
+            GameApp.Instance.StartCoroutine(DelayCoroutine(action, delay, real));
         }
 
         private static IEnumerator DelayCoroutine(Action action, float delay, bool real)
