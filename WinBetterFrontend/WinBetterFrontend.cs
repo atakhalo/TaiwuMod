@@ -12,6 +12,8 @@ using GameData.Domains.Taiwu.Display;
 using GameData.Domains.TaiwuEvent.DisplayEvent;
 using GameData.Serializer;
 using GameData.Utilities;
+using Game.Views.CharacterMenu;
+using GameData.Domains.World;
 using HarmonyLib;
 using HarmonyLib.Tools;
 using System;
@@ -26,7 +28,6 @@ using TaiwuModdingLib.Core.Plugin;
 using TaiwuModdingLib.Core.Utils;
 using TMPro;
 using UICommon.Character;
-using UICommon.Character.Avatar;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
@@ -48,7 +49,7 @@ namespace WinBetter
         public static void DelayCall(Action action, float delay, bool real)
         {
             //Game.Instance.StartCoroutine(DelayCoroutine(TrySetNpcFace, 0, avatar, null, relatedData));
-            Game.Instance.StartCoroutine(DelayCoroutine(action, delay, real));
+            GameApp.Instance.StartCoroutine(DelayCoroutine(action, delay, real));
         }
 
         private static IEnumerator DelayCoroutine(Action action, float delay, bool real)
@@ -205,26 +206,27 @@ namespace WinBetter
             ModManager.GetSetting(ModIdStr, "exNeili", ref exNeili);
         }
 
-        [HarmonyPostfix, HarmonyPatch(typeof(UI_CharacterMenuEquip), "OnEquipLoadChange")]
-        public static void OnEquipLoadChange(UI_CharacterMenuEquip __instance)
+        [HarmonyPostfix, HarmonyPatch(typeof(ViewCharacterMenuEquip), "RefreshEquipLoad")]
+        public static void OnEquipLoadChange(ViewCharacterMenuEquip __instance)
         {
             if (!avgGrade) return;
 
-            MyUtils.DelayCall(UpdateGrade, 0.1f, false);
-        }
+			MyUtils.DelayCall(UpdateGrade, 0.1f, false);
+		}
 
-        private static void UpdateGrade()
-        {
-            var ui = UIElement.CharacterMenuEquip.UiBase as UI_CharacterMenuEquip;
-            var grade = CaleGrade(ui);
+		private static void UpdateGrade()
+		{
+			var ui = UIElement.CharacterMenuEquip.UiBase as ViewCharacterMenuEquip;
+			if (ui == null) return;
+			var grade = CaleGrade(ui);
             var gradeStr = $"{grade:f1}".SetGradeColor(Mathf.FloorToInt(grade));
 
-            var _equipMonitor = Traverse.Create(ui).Field("_equipMonitor").GetValue<EquipmentMonitor>();
-            var o = string.Format("{0:f1}", (float)_equipMonitor.MaxEquipmentLoad / 100f);
-            ui.CGet<TextMeshProUGUI>("MaxLoad").text = $"{o} 品级:{gradeStr}";
+            var equipLoad = Traverse.Create(ui).Field("equipLoad").GetValue<TMP_Text>();
+			if(!equipLoad.text.Contains('\n')) // 防止重复添加
+            	equipLoad.text = equipLoad.text + $"\n品级:{gradeStr}";
         }
 
-        private static float CaleGrade(UI_CharacterMenuEquip __instance)
+        private static float CaleGrade(ViewCharacterMenuEquip __instance)
         {
             // 参考 后端 PrepareCombat CombatDomain
             // this.SelfAvgEquipGrade = 0f 部分
@@ -259,32 +261,22 @@ namespace WinBetter
             return selfAvgEquipGrade;
         }
 
-        [HarmonyPostfix, HarmonyPatch(typeof(UI_CharacterMenuEquipCombatSkill), "UpdateNeiliAllocation")]
-        public static void UpdateNeiliAllocation(UI_CharacterMenuEquipCombatSkill __instance)
+        [HarmonyPostfix, HarmonyPatch(typeof(ViewCharacterMenuNeili), "UpdateNeiliAllocation")]
+        public static void UpdateNeiliAllocation(ViewCharacterMenuNeili __instance,
+            NeiliAllocation baseValue, NeiliAllocation combatValue, NeiliAllocation value,
+            sbyte consummateLevel, int currNeili, List<short> featureIds)
         {
             if (!exNeili) return;
 
-            // 参考 UI_CharacterMenuEquipCombatSkill UpdateNeiliAllocation 部分
-            var ui = __instance;
-            var _neiliAllocationHolder = Traverse.Create(ui).Field("_neiliAllocationHolder").GetValue<RectTransform>();
-            var sum = 0;
-            for (byte type = 0; type < 4; type += 1)
-            {
-                Refers allocationRefers = _neiliAllocationHolder.GetChild((int)type).GetComponent<Refers>();
-                var o = allocationRefers.CGet<TextMeshProUGUI>("ExtraValue").text;
-                if(int.TryParse(GetNumInColor(o), out var n))
-                    sum += n;
-            }
+            var cur = baseValue.GetTotal();
+            var challengeModeData = SingletonObject.getInstance<BasicGameData>().ChallengeModeData;
+            var max = CombatHelper.GetMaxTotalNeiliAllocationConsideringFeature(consummateLevel, featureIds, challengeModeData);
+            var sum = combatValue.GetTotal() > 0
+                ? combatValue.GetTotal() - cur
+                : value.GetTotal() - cur;
 
-            var _neiliRefers = Traverse.Create(ui).Field("_neiliRefers").GetValue<Refers>();
-            var _baseNeiliAllocation = Traverse.Create(ui).Field("_baseNeiliAllocation").GetValue<NeiliAllocation>();
-            var cur = _baseNeiliAllocation.GetTotal();
-
-            var _dataMonitor = Traverse.Create(ui).Field("_dataMonitor").GetValue<EquipCombatSkillMonitor>();
-            var _featureIds = Traverse.Create(ui).Field("_featureIds").GetValue<List<short>>();
-            var max = CombatHelper.GetMaxTotalNeiliAllocationConsideringFeature(_dataMonitor.ConsummateLevel, _featureIds);
-
-            _neiliRefers.CGet<TextMeshProUGUI>("TotalNeiliAllocation").text = $"{cur}/{max}/{cur+sum}";
+			if(!__instance.neiliText.text.Contains('\n')) // 防止重复添加
+				__instance.neiliText.text = __instance.neiliText.text + $"\n真气：{cur}/{max}/{cur+sum}";
         }
 
         private static string GetNumInColor(string input)
