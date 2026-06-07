@@ -381,7 +381,7 @@ namespace WeightAnalyze
 				tl.Key = "";
 				GameObject.DestroyImmediate(tl);
 
-				weightBtnObj.transform.GetChild(0).GetComponent<TextMeshProUGUI>().text = "重量分析1";
+				// weightBtnObj.transform.GetChild(0).GetComponent<TextMeshProUGUI>().text = "重量分析1";
 				weightBtnObj.GetComponentInChildren<TextMeshProUGUI>(true).text = "重量分析";
 				weightBtnObj.GetComponent<Button>().onClick.RemoveAllListeners();
 				weightBtnObj.GetComponent<Button>().onClick.AddListener(OnBtnClick);
