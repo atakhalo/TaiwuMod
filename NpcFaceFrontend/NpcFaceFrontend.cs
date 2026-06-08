@@ -37,6 +37,7 @@ using UICommon.Character;
 //using UICommon.Character.Avatar;
 using UnityEngine;
 using UnityEngine.UI;
+using Spine.Unity;
 using TaiwuAvatar = Game.Components.Avatar.Avatar;
 using TaiwuAvatarSize = Game.Components.Avatar.AvatarSize;
 
@@ -192,6 +193,7 @@ namespace NpcFace
         public static bool forNpc; // 开关 NPC是否开启
 
 
+		// 提一些特殊的npc 出来到设置界面方便 玩家选择
         public static string[] npcName = {
             "NpcFace_yingjiao",//迎娇
             "NpcFace_wanquzhimin", // 螺舟
@@ -242,7 +244,7 @@ namespace NpcFace
         public static int npcNameIdx = 0; // 资源名序号
 
         public static bool customNpc; // 开关 是否自选
-        public static string npcNameCustom; // 资源名
+        public static string npcNameCustom; // 资源名 太吾使用 特殊npc图片的文件名
 
         public static bool showCharId = false; // 开关 是否显示为charid
         public static Dictionary<int, string> idRes = new Dictionary<int, string>();  // 需要显示立绘的 普通npc id 对应立绘; 不使用了
@@ -258,6 +260,10 @@ namespace NpcFace
 
 		public static Dictionary<int, string> idNameCache = new Dictionary<int, string>(); // 对一些id 跟 name进行缓存
 
+		public static Dictionary<string, int> ImgTemplate = new Dictionary<string, int>(); // npc模板id缓存
+
+		public static bool samllSpine = false;
+
 
 		public static void MyLog(string log)
         {
@@ -268,9 +274,13 @@ namespace NpcFace
         {
 			MyUtils.MyLog("Initialize");
             harmony = Harmony.CreateAndPatchAll(typeof(NpcFaceFrontendPlugin));
-            GameApp.Instance.StartCoroutine(TryScanMod());
 
-        }
+			// 进行模板扫描
+            GameApp.Instance.StartCoroutine(TryScanTemplate());
+
+			GameApp.Instance.StartCoroutine(TryScanMod());
+
+		}
 
         public override void Dispose()
         {
@@ -313,13 +323,33 @@ namespace NpcFace
             ModManager.GetSetting(ModIdStr, "resDir3", ref resDirStr);
             if (!string.IsNullOrEmpty(resDirStr)) resDirs.Add(resDirStr);
             tagDirs["3"] = new string(resDirStr);
-        }
+			ModManager.GetSetting(ModIdStr, "npcNameCustom", ref npcNameCustom);
 
-        /// <summary>
-        /// 根据 TaiwuYingjiao.txt 收集tag跟目录
-        /// </summary>
-        /// <returns></returns>
-        public static IEnumerator TryScanMod()
+			// 目前小图片都没有 npcSkeleton，samllSpine没有用
+			// ModManager.GetSetting(ModIdStr, "samllSpine", ref samllSpine); // 
+		}
+
+		/// <summary>
+		/// 尝试扫描记录 立绘图名字 对应的模板id
+		/// 数据大概800个项，立绘图大概500+
+		/// </summary>
+		public static IEnumerator TryScanTemplate()
+		{
+            yield return new WaitForSeconds(0);
+			var _dataArray = Traverse.Create(Character.Instance).Field("_dataArray").GetValue<List<CharacterItem>>();
+			for (int i = 0; i < _dataArray.Count; i++)
+			{
+				if(string.IsNullOrEmpty(_dataArray[i].FixedAvatarName)) continue;
+				if(!ImgTemplate.ContainsKey(_dataArray[i].FixedAvatarName))
+					ImgTemplate[_dataArray[i].FixedAvatarName] = _dataArray[i].TemplateId;
+			}
+		}
+
+		/// <summary>
+		/// 根据 TaiwuYingjiao.txt 收集tag跟目录
+		/// </summary>
+		/// <returns></returns>
+		public static IEnumerator TryScanMod()
         {
             yield return new WaitForSeconds(0);
             //MyLog("TryScanMod");
@@ -812,6 +842,9 @@ namespace NpcFace
 
 		#endregion
 
+		#region 
+		#endregion
+
 		#region hook 游戏中的加载接口，然后寻找name进行立绘替换
 		[HarmonyPostfix, HarmonyPatch(typeof(TaiwuAvatar), "Refresh", argumentTypes: new Type[2] { typeof(CharacterDisplayData), typeof(bool) })]
         public static void OnRefreshChar(TaiwuAvatar __instance, CharacterDisplayData displayData, bool isShowGrave)
@@ -932,9 +965,9 @@ namespace NpcFace
 
             //MyLog($"LoadModOrGameResource 1 ");
             if (avatar == null) return false;
-            //MyLog($"LoadModOrGameResource 2");
+			//MyLog($"LoadModOrGameResource 2");
 
-            var avatarAssetName = "NpcFace_yingjiao";
+			var avatarAssetName = "NpcFace_yingjiao";
             if(isTaiwu)
             {
                 if (customNpc)
@@ -963,23 +996,51 @@ namespace NpcFace
             //MyLog($"load {resPath}");
             //MyLog($"LoadModOrGameResource");
 
+			// 游戏内资源
             if (!loadMod)
             {
+				// 尝试进行动态立绘
+				var toSpine = false;
+				var isSpine = false;
+				if (avatar.PreferDynamicAvatar)
+				{
+					if(samllSpine || (!samllSpine && avatar.size != TaiwuAvatarSize.Small))
+					{
+						var npcSkeleton = Traverse.Create(avatar).Field("npcSkeleton").GetValue<SkeletonGraphic>();
+						if (npcSkeleton != null)
+							toSpine = true;
+					}
+				}
+				if(toSpine)
+				{
+					if(ImgTemplate.TryGetValue(avatarAssetName, out int characterTemplateId))
+					{
+						CharacterItem config = Character.Instance[characterTemplateId];
+						string spineName = config.FixedAvatarSpineName;
+						string skinName = config.FixedAvatarSpineSkin;
+						if(!string.IsNullOrEmpty(spineName))
+						{
+							isSpine = true;
+							avatar.RefreshAsSpine(spineName, skinName);
+							return true;
+						}
+					}
+				}
+
+				// 否则静态
                 ResLoader.LoadModOrGameResource<Texture2D>(resPath, delegate (Texture2D tex)
                 {
-                    //MyLog($"LoadModOrGameResource");
                     if (avatar == null) return;
-                    //var cloth = avatar.CGet<CImage>("Cloth");
-                    //MyLog($"LoadModOrGameResource {cloth} {cloth?.sprite}");
                     avatar.Refresh(tex);
                     if (instance == null) return;
-                    instance.OnFillAvatar?.Invoke();
-                }, (tex) => {
+                    instance.OnFillAvatar?.Invoke(); // CharacterAvatar 非空时触发回调
+				}, (tex) => {
                 });
                 return true;
             }
-            else
-            {
+			// 自定义资源
+			else
+			{
                 var tex = TryLoadImg(resPath);
                 if(tex == null) return false;
                 avatar.Refresh(tex);
@@ -989,14 +1050,20 @@ namespace NpcFace
             }
         }
 
+		/// <summary>
+		/// 解析 资源名配置， 尝试读取资源
+		/// 如果 资源名有`:`，则表示是自定义路径资源
+		/// 没有则是游戏内资源
+		/// bool 返回是否自定义还是游戏内
+		/// </summary>
         private static bool GetResPath(string avatarAssetName, TaiwuAvatarSize avatarSize, out string resPath)
         {
             //MyLog($"GetResPath {avatarAssetName}");
             var dir = TryLoadResDir(avatarAssetName, out var relName);
             //MyLog($"GetResPath {dir}");
+			// 路径非空 为自定义资源
             if (!string.IsNullOrEmpty(dir)) // resDirs 0 是空字符串
             {
-
                 // 先检查 BigTexture mod路径，再检查 BigFace 路径
                 var size1 = GetSizeFolder(avatarSize, 1);
                 var res1 = Path.Combine(dir, size1, relName);
@@ -1010,6 +1077,7 @@ namespace NpcFace
                 resPath = "";
                 return true;
             }
+			// 空路径为游戏内资源
             else
             {
                 string sizeFolder = CharacterAvatar.GetAvatarSizeFolder(avatarSize);
@@ -1020,7 +1088,12 @@ namespace NpcFace
             resPath = "";
             return false;
         }
-        public static string TryLoadResDir(string avatarAssetName, out string relName)
+
+		/// <summary>
+		/// 解析获取自定义路径
+		/// 根据`:`前的tag，从 tagDirs 中 找到对应的路径
+		/// </summary>
+		public static string TryLoadResDir(string avatarAssetName, out string relName)
         {
             //MyLog($"TryLoadResDir {avatarAssetName}");
             var r = avatarAssetName.Split(':');
@@ -1034,7 +1107,11 @@ namespace NpcFace
             return "";
         }
 
-        private static string GetSizeFolder(TaiwuAvatarSize avatarSize, int type)
+		/// <summary>
+		/// 获取 图片大小对应的文件夹，
+		/// 游戏内使用 Face系列， Texture主要为了适配立绘框架mod
+		/// </summary>
+		private static string GetSizeFolder(TaiwuAvatarSize avatarSize, int type)
         {
             if(type == 0)
             {
@@ -1057,7 +1134,11 @@ namespace NpcFace
             }
             return "";
         }
-        private static Texture2D TryLoadImg(string resPath)
+
+		/// <summary>
+		/// 尝试加载图片，并 按路径 放入 图片缓存 resCache
+		/// </summary>
+		private static Texture2D TryLoadImg(string resPath)
         {
             if(resCache.TryGetValue(resPath, out Texture2D img)) { return img; }
             //MyLog($"tryLoad {resPath}");
@@ -1071,13 +1152,6 @@ namespace NpcFace
                 return texture;
             }
             return null;
-            //UnityEngine.image
-            //UnityEngine.ImageConversion
-            
-            //if (texture.LoadImage(fileData))
-            //{
-            //    return texture;
-            //}
         }
         #endregion
 
