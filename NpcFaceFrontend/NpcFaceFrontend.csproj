@@ -313,6 +313,10 @@
       <HintPath>..\..\..\..\..\Program Files (x86)\Steam\steamapps\common\The Scroll Of Taiwu\The Scroll of Taiwu_Data\Managed\spine-unity.dll</HintPath>
       <Private>False</Private>
     </Reference>
+	<Reference Include="spine-csharp">
+      <HintPath>..\..\..\..\..\Program Files (x86)\Steam\steamapps\common\The Scroll Of Taiwu\The Scroll of Taiwu_Data\Managed\spine-csharp.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
   </ItemGroup>
 
 </Project>

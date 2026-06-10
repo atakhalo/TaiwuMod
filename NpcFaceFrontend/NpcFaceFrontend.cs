@@ -37,9 +37,11 @@ using UICommon.Character;
 //using UICommon.Character.Avatar;
 using UnityEngine;
 using UnityEngine.UI;
+using Spine;
 using Spine.Unity;
 using TaiwuAvatar = Game.Components.Avatar.Avatar;
 using TaiwuAvatarSize = Game.Components.Avatar.AvatarSize;
+using System.Xml.Linq;
 
 namespace NpcFace
 {
@@ -264,10 +266,30 @@ namespace NpcFace
 
 		public static bool samllSpine = false;
 
+		public static SkeletonDataAsset skeletonDataTemp;
+
+		public class SpineConfig
+		{
+			public string fileDir;
+			public string fileName;
+			public string keyName;
+			public List<string> altas;
+			public string skinName;
+			public string animName;
+			public float scaleBig = 1.0f;
+			public float scaleNormal = 0.5f;
+			public float scaleSmall = 1.0f;
+			public float offsetX = 0f;
+			public float offsetY = 0f;
+
+		}
+		// spine 配置缓存； 设置变化的是否清零；
+		// 记录 配置文件名 对应 spine 配置 （如 皮肤、皮肤图集、默认动画）
+		public static Dictionary<string, SpineConfig> spineConfigs = new Dictionary<string, SpineConfig>();
 
 		public static void MyLog(string log)
         {
-			MyUtils.MyLog(log);
+			// MyUtils.MyLog(log);
         }
 
         public override void Initialize()
@@ -292,7 +314,7 @@ namespace NpcFace
 
         public override void OnModSettingUpdate()
         {
-            ModManager.GetSetting(ModIdStr, "npcFace", ref npcFace);
+			ModManager.GetSetting(ModIdStr, "npcFace", ref npcFace);
             ModManager.GetSetting(ModIdStr, "forTaiwu", ref forTaiwu);
             ModManager.GetSetting(ModIdStr, "forNpc", ref forNpc);
             ModManager.GetSetting(ModIdStr, "npcNameIdx", ref npcNameIdx);
@@ -327,6 +349,8 @@ namespace NpcFace
 
 			// 目前小图片都没有 npcSkeleton，samllSpine没有用
 			// ModManager.GetSetting(ModIdStr, "samllSpine", ref samllSpine); // 
+
+			spineConfigs.Clear();
 		}
 
 		/// <summary>
@@ -374,12 +398,12 @@ namespace NpcFace
                     MyLog($"太吾迎娇 收集到图片目录 {tagDirs.Count} {tag}:{dirPath} ");
                 }
             }
-        }
+		}
 
 		/// <summary>
 		/// 读取 mod 设置 中 普通npc 配置 （可能是tag形式进行 文件配置）
 		/// </summary>
-        public  void TryLoadNpc(string nameKey, string resKey, string assetKey)
+		public  void TryLoadNpc(string nameKey, string resKey, string assetKey)
         {
             string npcNameStr = "";
             int npcResIdx = 0;
@@ -453,7 +477,7 @@ namespace NpcFace
             var curId = charId;
             if (curId != -1)
             {
-                MyUtils.MyLog($"charId 找到id {curId}");
+                // MyUtils.MyLog($"charId 找到id {curId}");
                 if (idRes.ContainsKey(curId))
                     resLoad(avatar, instance, isTaiwu: false, idRes[curId]);
             }
@@ -467,7 +491,7 @@ namespace NpcFace
             var curId = data.CharacterId;
             if (curId != -1)
             {
-				MyUtils.MyLog($"CharacterDisplayData 找到id {curId}");
+				// MyUtils.MyLog($"CharacterDisplayData 找到id {curId}");
 				if (idRes.ContainsKey(curId))
                     resLoad(avatar, instance, isTaiwu: false, idRes[curId]);
             }
@@ -479,7 +503,7 @@ namespace NpcFace
 		/// </summary>
 		public static void TrySetNpcFace(TaiwuAvatar avatar, CharacterAvatar? instance, AvatarRelatedData relatedData)
         {
-			MyUtils.MyLog("TrySetNpcFace");
+			// MyUtils.MyLog("TrySetNpcFace");
             if(avatar == null) return;
             var curId = TryFindId(avatar.transform, maxUp: 3);
             if(curId != -1)
@@ -502,7 +526,7 @@ namespace NpcFace
 		// 尝试寻找id， maxUp 控制向上寻找的层数
 		public static int TryFindId(Transform transform, int maxUp)
         {
-			MyUtils.MyLog($"当前查找{transform}, {maxUp}");
+			// MyUtils.MyLog($"当前查找{transform}, {maxUp}");
 			var s = TryGetNpcId(transform);
             if (s == -1)
             {
@@ -527,7 +551,7 @@ namespace NpcFace
                 r.RuntimeParam.Get("charId", out charId);
                 if (charId == -1) r.RuntimeParam.Get("CharId", out charId);
                 if (charId == -1) r.RuntimeParam.Get("NpcCharId", out charId);
-				MyUtils.MyLog($"找到 TooltipInvoker {charId}");
+				// MyUtils.MyLog($"找到 TooltipInvoker {charId}");
             }
             return charId;
         }
@@ -539,7 +563,7 @@ namespace NpcFace
 		/// </summary>
 		public static bool TrySetNpcFaceByName(TaiwuAvatar avatar, CharacterAvatar? instance, AvatarRelatedData relatedData)
         {
-            MyUtils.MyLog($"TrySetNpcFaceByName relatedData {avatar}");
+            // MyUtils.MyLog($"TrySetNpcFaceByName relatedData {avatar}");
             if (avatar == null) return false;
             var curName = TryFindName(avatar.transform, maxUp: 3);
             if (curName != "")
@@ -558,12 +582,12 @@ namespace NpcFace
                     }
                     else
                     {
-						MyUtils.MyLog($"TrySetNpcFaceByName 名字不对 {curName}");
+						// MyUtils.MyLog($"TrySetNpcFaceByName 名字不对 {curName}");
 						return false;
                     }
                 }
             }
-			MyUtils.MyLog($"TrySetNpcFaceByName 没找到名字");
+			// MyUtils.MyLog($"TrySetNpcFaceByName 没找到名字");
 			return false;
         }
 
@@ -572,12 +596,12 @@ namespace NpcFace
 		/// </summary>
 		public static bool TrySetNpcFaceByName(TaiwuAvatar avatar, CharacterAvatar? instance, CharacterDisplayData displayData)
         {
-            MyUtils.MyLog($"TrySetNpcFaceByName displayData  {avatar}");
+            // MyUtils.MyLog($"TrySetNpcFaceByName displayData  {avatar}");
             if (avatar == null) return false;
             string curName = NameCenter.GetMonasticTitleOrDisplayName(displayData, isTaiwu: false);
             if (curName != "")
             {
-				MyUtils.MyLog($"TrySetNpcFaceByName 找到名字 {curName}");
+				// MyUtils.MyLog($"TrySetNpcFaceByName 找到名字 {curName}");
                 if (npcRes.ContainsKey(curName))
                     return resLoad(avatar, instance, isTaiwu: false, npcRes[curName]);
             }
@@ -620,7 +644,7 @@ namespace NpcFace
 
 			TextMeshProUGUI t = null;
             var ts = transform.GetComponentsInChildren<TextMeshProUGUI>();
-			MyUtils.MyLog($" {transform} 下 tmp总个数为 {ts.Count()} ");
+			// MyUtils.MyLog($" {transform} 下 tmp总个数为 {ts.Count()} ");
 			foreach (var t1 in ts)
             {
                 if (t1.name.Contains("name") || t1.name.Contains("Name")
@@ -638,10 +662,10 @@ namespace NpcFace
             }
             if (t)
             {
-                MyUtils.MyLog($"找到 {transform}下的tmp  {t} {t.text}");
+                // MyUtils.MyLog($"找到 {transform}下的tmp  {t} {t.text}");
                 return t.text;
             }
-			MyUtils.MyLog($" {transform} 无 命名tmp ");
+			// MyUtils.MyLog($" {transform} 无 命名tmp ");
 			
 
 
@@ -655,7 +679,7 @@ namespace NpcFace
                 {
                     var taiwuId = SingletonObject.getInstance<BasicGameData>().TaiwuCharId;
                     string curName = NameCenter.GetMonasticTitleOrDisplayName(charData, isTaiwu: charData.CharacterId == taiwuId);
-					MyUtils.MyLog($"找到 {transform}下的 MouseTipDisplayer CharData {curName}");
+					// MyUtils.MyLog($"找到 {transform}下的 MouseTipDisplayer CharData {curName}");
                     return curName;
                 }
 				mouseTipDisplayer.RuntimeParam.Get("characterId", out int charId);
@@ -668,14 +692,14 @@ namespace NpcFace
             if (r is Avatar) r = null;
             if (r != null)
             {
-				MyUtils.MyLog($"找到refer {r} {r.Names.Count}");
+				// MyUtils.MyLog($"找到refer {r} {r.Names.Count}");
                 r.CTryGet<TextMeshProUGUI>("Name", out t);
                 if(t == null) r.CTryGet<TextMeshProUGUI>("CharacterName", out t);
                 if(t == null) r.CTryGet<TextMeshProUGUI>("CharName", out t);
             }
             if (t)
             {
-				MyUtils.MyLog($"找到 refer 下的tmp {t} {t.text}");
+				// MyUtils.MyLog($"找到 refer 下的tmp {t} {t.text}");
 				return t.text;
             }
             return "";
@@ -821,7 +845,7 @@ namespace NpcFace
 			if(data.Count > index && data[index].CharacterId != -1)
 			{
 				var name = NameCenter.GetMonasticTitleOrDisplayName(data[index], isTaiwu: false);
-				MyUtils.MyLog($"ViewBottom__NameHook {name}");
+				// MyUtils.MyLog($"ViewBottom__NameHook {name}");
 				if (npcRes.ContainsKey(name))
 					idNameCache[data[index].CharacterId] = NameCenter.GetMonasticTitleOrDisplayName(data[index], isTaiwu: false);
 			}
@@ -835,7 +859,7 @@ namespace NpcFace
 			if(isTaiwu) return;
 			if(npcRes.ContainsKey(__result))
 			{
-				MyUtils.MyLog($"GetMonasticTitleOrDisplayName {__result}");
+				// MyUtils.MyLog($"GetMonasticTitleOrDisplayName {__result}");
 				idNameCache[displayData.CharacterId] = __result;
 			}
 		}
@@ -897,7 +921,7 @@ namespace NpcFace
         public static void FillElementPost(CharacterAvatar __instance)
         {
             if (!npcFace) return;
-            MyUtils.MyLog($"FillElementPost");
+            // MyUtils.MyLog($"FillElementPost");
             if (__instance == null) return;
             var taiwuCharId = SingletonObject.getInstance<BasicGameData>().TaiwuCharId;
             if (__instance.CharacterId == taiwuCharId)
@@ -958,14 +982,10 @@ namespace NpcFace
 		#region 资源加载
         private static bool resLoad(TaiwuAvatar avatar, CharacterAvatar? instance, bool isTaiwu, string res=null)
         {
-            //MyLog($"LoadModOrGameResource 0 ");
             if (!npcFace) return false;
             if (isTaiwu && !forTaiwu) return false;
             if (!isTaiwu && !forNpc) return false;
-
-            //MyLog($"LoadModOrGameResource 1 ");
             if (avatar == null) return false;
-			//MyLog($"LoadModOrGameResource 2");
 
 			var avatarAssetName = "NpcFace_yingjiao";
             if(isTaiwu)
@@ -974,7 +994,6 @@ namespace NpcFace
                 {
                     if (string.IsNullOrEmpty(npcNameCustom)) return false;
                     avatarAssetName = npcNameCustom;
-
                 }
                 else
                 {
@@ -983,72 +1002,379 @@ namespace NpcFace
             }
             else
             {
-                //MyLog($"LoadModOrGameResource 3");
-
                 if (string.IsNullOrEmpty(res)) return false;
                 avatarAssetName = res;
             }
-            //MyLog($"LoadModOrGameResource 4");
 
+			// 判断是否进行动态立绘
+			var toSpine = false;
+			if (avatar.PreferDynamicAvatar)
+			{
+				if (samllSpine || (!samllSpine && avatar.size != TaiwuAvatarSize.Small))
+				{
+					var npcSkeleton = Traverse.Create(avatar).Field("npcSkeleton").GetValue<SkeletonGraphic>();
+					if (npcSkeleton != null)
+						toSpine = true;
+				}
+			}
+			if (toSpine)
+			{
+				if(TrySpine(avatar, instance, avatarAssetName, isTaiwu))
+					return true;
+			}
+			return TryTexture(avatar, instance, avatarAssetName);
+        }
 
-            var loadMod = GetResPath(avatarAssetName, avatar.Size, out var resPath);
-            if (string.IsNullOrEmpty(resPath)) return false;// 报错出来
-            //MyLog($"load {resPath}");
-            //MyLog($"LoadModOrGameResource");
+		private static bool TrySpine(TaiwuAvatar avatar, CharacterAvatar? instance, string avatarAssetName, bool isTaiwu)
+		{
+			// MyUtils.MyLog("TrySpine 开始尝试走spine");
+			// 先尝试获取 spine 文件（spine 骨骼，spine atlas, spine png）
+			var dir = TryLoadResDir(avatarAssetName, out var fileName);
+			// MyUtils.MyLog($"TrySpine 读取到1 {dir}, {fileName}");
+
+			// if (!isTaiwu) // 调试时，只显示太吾
+			// 	return TrySpineBuiltIn(avatar, instance, avatarAssetName);
+
+			// 尝试从 dir 路径下 获取 spine 文件夹，并获取 fileName 文件夹 下 三个同名文件
+			// 如果三个文件都齐全，构造 SkeletonDataAsset， 并缓存
+			// 如果不齐全， 尝试加载游戏内 同名 SkeletonDataAsset，并替换相应资源（主要是图集）
+			// 尝试从 dir 路径下获取 spine 文件夹中的三个同名文件
+			if (!string.IsNullOrEmpty(dir) && !string.IsNullOrEmpty(fileName))
+			{
+				var config = LoadSpineConfig(dir, fileName, avatarAssetName);
+				GetSpinePath(config, out string skelPath, out string atlasPath);
+				// MyUtils.MyLog($"TrySpine 读取到21 {dir}, {fileName}");
+				// MyUtils.MyLog($"TrySpine 读取到22 {skelPath}");
+				// MyUtils.MyLog($"TrySpine 读取到23 {atlasPath}");
+				if (TrySpineFromFiles(avatar, instance, config, skelPath, atlasPath))
+					return true;
+			}
+			// MyUtils.MyLog($"TrySpine 走内置流程");
+			return TrySpineBuiltIn(avatar, instance, avatarAssetName);
+		}
+
+		private static SpineConfig LoadSpineConfig(string dir, string fileName, string avatarAssetName)
+		{
+			if(spineConfigs.TryGetValue(avatarAssetName, out var s))
+				return s;
+
+			var sc = new SpineConfig
+			{
+				fileDir = Path.Combine(dir, "Spine", fileName),
+				keyName = avatarAssetName,
+				fileName = fileName,
+				altas = new List<string>(),
+				skinName = "",
+				animName = "",
+			};
+			spineConfigs[avatarAssetName] = sc;
+
+			var config = Path.Combine(dir, "Spine", fileName, "config.xml");
+			if(!File.Exists(config)) return sc;
+
+			XDocument doc = XDocument.Load(config);
+			// 获取 altas 下的所有 file 元素值，若不存在则得到空数组
+			sc.altas = doc.Descendants("altas")
+								.Elements("file")
+								.Select(e => e.Value)
+								.ToList();
+
+			sc.skinName = doc.Descendants("skin").FirstOrDefault()?.Value ?? "";
+			sc.animName = doc.Descendants("anim").FirstOrDefault()?.Value ?? "";
+			sc.scaleBig = float.Parse(doc.Descendants("scaleBig").FirstOrDefault()?.Value);
+			sc.scaleNormal = float.Parse(doc.Descendants("scaleNormal").FirstOrDefault()?.Value);
+			sc.scaleSmall = float.Parse(doc.Descendants("scaleSmall").FirstOrDefault()?.Value);
+			sc.offsetX = float.Parse(doc.Descendants("offsetX").FirstOrDefault()?.Value);
+			sc.offsetY = float.Parse(doc.Descendants("offsetY").FirstOrDefault()?.Value);
+			return sc;
+		}
+
+		private static void GetSpinePath(SpineConfig spineConfig, out string skel, out string altasTxt)
+		{
+			// 加载skel， 可能是 .json 后缀， .skel 后缀，或者 .skel.bytes 后缀
+			var skel1 = Path.Combine(spineConfig.fileDir, spineConfig.fileName + ".json");
+			if (File.Exists(skel1)) { skel = skel1; }
+			else 
+			{
+				skel1 = Path.Combine(spineConfig.fileDir, spineConfig.fileName + ".skel.bytes");
+				if (File.Exists(skel1)) { skel = skel1;  }
+				else
+				{
+					skel1 = Path.Combine(spineConfig.fileDir, spineConfig.fileName + ".skel");
+					if (File.Exists(skel1)) { skel = skel1; }
+					else skel = "";
+				}
+			}
+
+			// 加载 altasTxt, 可能是 .atlas 后缀，或者 .atlas.txt 后缀
+			var altasTxt1 = Path.Combine(spineConfig.fileDir, spineConfig.fileName + ".atlas.txt");
+			if (File.Exists(altasTxt1)) { altasTxt = altasTxt1; }
+			else
+			{
+				altasTxt1 = Path.Combine(spineConfig.fileDir, spineConfig.fileName + ".atlas");
+				if (File.Exists(altasTxt1)) { altasTxt = altasTxt1; }
+				else altasTxt = "";
+			}
+
+			if(spineConfig.altas.Count == 0)
+			{
+				// 加载 altasPng, .png 后缀
+				var altasPng1 = Path.Combine(spineConfig.fileDir, spineConfig.fileName + ".png");
+				if (File.Exists(altasPng1)) 
+				{
+					spineConfig.altas.Add(spineConfig.fileName);
+				}
+			}
+		}
+
+		private static bool TrySpineBuiltIn(TaiwuAvatar avatar, CharacterAvatar? instance, string avatarAssetName)
+		{
+			// 走原加载逻辑
+			if (ImgTemplate.TryGetValue(avatarAssetName, out int characterTemplateId))
+			{
+				CharacterItem config = Character.Instance[characterTemplateId];
+				string spineName = config.FixedAvatarSpineName;
+				string skinName = config.FixedAvatarSpineSkin;
+				if (!string.IsNullOrEmpty(spineName))
+				{
+					avatar.RefreshAsSpine(spineName, skinName);
+					return true;
+				}
+			}
+			return false;
+		}
+
+		/// <summary>
+		/// 从文件系统加载 spine 资源（.skel + .atlas + .png）并应用到 avatar
+		/// </summary>
+		private static bool TrySpineFromFiles(TaiwuAvatar avatar, CharacterAvatar? instance, SpineConfig spineConfig,
+			string skelPath, string atlasPath)
+		{
+			// MyUtils.MyLog($"开始走自定义流程 TrySpineFromFiles");
+
+			if (!TryLoadSpineAtlas(avatar, spineConfig, atlasPath, out var atlasAsset, out var atlas))
+				return false;
+
+			if (!TryCreateSkeletonDataAsset(spineConfig, skelPath, atlas, atlasAsset, out var asset))
+				return false;
+
+			if (!TryApplySpineAsset(avatar, instance, spineConfig, asset))
+				return false;
+
+			// MyUtils.MyLog($"TrySpineFromFiles: success {Path.GetFileName(skelPath)}");
+			return true;
+		}
+
+		/// <summary>
+		/// 加载图集：读取 .atlas 文本和 .png 纹理，创建 SpineAtlasAsset
+		/// </summary>
+		private static bool TryLoadSpineAtlas(TaiwuAvatar avatar, SpineConfig spineConfig, string atlasPath, 
+			out SpineAtlasAsset atlasAsset, out Atlas atlas)
+		{
+			atlasAsset = null;
+			atlas = null;
+			string atlasContent = File.ReadAllText(atlasPath);
+			var textAsset = new TextAsset(atlasContent);
+
+			List<Texture2D> altas = new List<Texture2D>();
+			for (int i = 0; i < spineConfig.altas.Count; i++)
+			{
+				var item = spineConfig.altas[i];
+				var pngPath = Path.Combine(spineConfig.fileDir, item + ".png");
+				byte[] pngBytes = File.ReadAllBytes(pngPath);
+				Texture2D texture = new Texture2D(1, 1);
+				texture.LoadImage(pngBytes);
+				texture.name = item;
+				altas.Add(texture);
+			}
+
+			// 从 avatar 的 npcSkeleton 克隆材质
+			var npcSkeleton = Traverse.Create(avatar).Field("npcSkeleton").GetValue<SkeletonGraphic>();
+			UnityEngine.Material templateMat = npcSkeleton.material;
+
+			atlasAsset = SpineAtlasAsset.CreateRuntimeInstance(textAsset, altas.ToArray(), templateMat, true);
+			atlas = atlasAsset.GetAtlas();
+
+			// MyUtils.MyLog($"TryLoadSpineAtlas: success {Path.GetFileName(atlasPath)}");
+			return true;
+		}
+
+		/// <summary>
+		/// 读取骨骼数据并生成 SkeletonDataAsset
+		/// </summary>
+		private static bool TryCreateSkeletonDataAsset(SpineConfig spineConfig, string skelPath, Atlas atlas, SpineAtlasAsset atlasAsset,
+			out SkeletonDataAsset asset)
+		{
+			asset = null;
+			if(skelPath.EndsWith(".json"))
+			{
+				string skeletonJsonContent = File.ReadAllText(skelPath);
+				TextAsset skeletonJsonTextAsset = new TextAsset(skeletonJsonContent);
+				asset = SkeletonDataAsset.CreateRuntimeInstance(skeletonJsonTextAsset, atlasAsset, false, 0.01f);
+			}
+			else 
+			{
+				if (skelPath != "") // 是 二进制文件
+				{
+					// 读取骨骼数据
+					var binary = new SkeletonBinary(atlas);
+					binary.Scale = 0.01f;
+					var skeletonData = binary.ReadSkeletonData(skelPath);
+					// 创建 SkeletonDataAsset（skeletonJSON 传 占位值，因为 .skel 是二进制格式）
+					asset = SkeletonDataAsset.CreateRuntimeInstance(new TextAsset(), atlasAsset, false, 0.01f);
+					Traverse.Create(asset).Field("skeletonData").SetValue(skeletonData);
+					Traverse.Create(asset).Field("stateData").SetValue(new AnimationStateData(skeletonData));
+				}
+				// 按游戏内文件
+				else
+				{
+					CharacterItem config = Character.Instance[ImgTemplate[spineConfig.fileName]];
+					string spineName = config.FixedAvatarSpineName;
+					string spineDataPath = "RemakeResources/SpineAnimations/" + spineName + "_SkeletonData";
+					ResLoader.Load<SkeletonDataAsset>(spineDataPath, delegate (SkeletonDataAsset skeletonData)
+					{
+						skeletonDataTemp = skeletonData;
+					});
+					asset = skeletonDataTemp;
+					skeletonDataTemp = null;
+				}
+			}
+			// MyUtils.MyLog($"TryCreateSkeletonDataAsset: success {Path.GetFileName(skelPath)}");
+			return true;
+		}
+
+		/// <summary>
+		/// 将 SkeletonDataAsset 应用到 avatar 的 SkeletonGraphic 上
+		/// </summary>
+		private static bool TryApplySpineAsset(TaiwuAvatar avatar, CharacterAvatar? instance, SpineConfig spineConfig,
+			SkeletonDataAsset asset)
+		{
+			// 获取 npcSkeleton
+			var npcSkeleton = Traverse.Create(avatar).Field("npcSkeleton").GetValue<SkeletonGraphic>();
+			if (npcSkeleton == null)
+			{
+				MyUtils.MyLog("TryApplySpineAsset: npcSkeleton is null");
+				return false;
+			}
+
+			// 禁用 avatarSkeleton，激活 avatarContainer
+			var avatarSkeleton = Traverse.Create(avatar).Field("avatarSkeleton").GetValue<Game.Components.Avatar.AvatarSkeleton>();
+			if (avatarSkeleton != null)
+				avatarSkeleton.gameObject.SetActive(false);
+
+			var avatarContainer = Traverse.Create(avatar).Field("avatarContainer").GetValue<GameObject>();
+			if (avatarContainer != null)
+				avatarContainer.SetActive(true);
+
+			var spineName = spineConfig.keyName;
+			var skinName = spineConfig.skinName;
+			var _currentSpineName = Traverse.Create(avatar).Field("_currentSpineName").GetValue<string>();
+			bool isSameSpine = _currentSpineName == spineName;
+			if(isSameSpine && npcSkeleton.gameObject.activeSelf)
+			{
+				float spineScale = GetSpineScale(spineConfig, avatar.Size);
+				npcSkeleton.transform.localScale = Vector3.one * spineScale;
+				if(!npcSkeleton.gameObject.activeSelf)
+					npcSkeleton.gameObject.SetActive(true);
+				// 应用偏移（使用 Traverse 调用私有方法）
+				var o = new Vector2(spineConfig.offsetX, spineConfig.offsetY);
+				Traverse.Create(avatar).Method("ApplyAvatarOffset", o).GetValue();
+			}
+			else
+			{
+				avatar.ResetToBlank(false); // 重置到空白状态，清除旧的头像部件精灵
+
+				// 设置 spine 数据到 SkeletonGraphic
+				npcSkeleton.skeletonDataAsset = asset;
+				npcSkeleton.initialSkinName = skinName;
+				npcSkeleton.Initialize(true);
+				npcSkeleton.UnscaledTime = true;
+
+				// 播放动画
+				var skelData = asset.GetSkeletonData(false);
+				var animations = skelData.Animations;
+				if (animations.Count > 0)
+				{
+
+					if(spineConfig.animName != "")
+					{
+						npcSkeleton.startingAnimation = spineConfig.animName;
+					}
+					else
+						npcSkeleton.startingAnimation = animations.Items[0].Name;
+					if (npcSkeleton.AnimationState != null)
+						npcSkeleton.AnimationState.SetAnimation(0, npcSkeleton.startingAnimation, true);
+				}
+
+				// 设置缩放和激活
+				npcSkeleton.transform.localScale = Vector3.one * GetSpineScale(spineConfig, avatar.Size);
+				npcSkeleton.gameObject.SetActive(true);
+
+				Traverse.Create(avatar).Field("_currentSpineName").SetValue(spineName);
+				Traverse.Create(avatar).Field("_currentSpineSkin").SetValue(skinName);
+				// 应用偏移
+				var o = new Vector2(spineConfig.offsetX, spineConfig.offsetY);
+				Traverse.Create(avatar).Method("ApplyAvatarOffset", o).GetValue();
+			}
+
+			// 触发 CharacterAvatar 回调
+			if (instance != null)
+				instance.OnFillAvatar?.Invoke();
+
+			// MyUtils.MyLog("TryApplySpineAsset: success");
+			return true;
+		}
+
+		/// <summary>
+		/// 根据 AvatarSize 获取 spine 缩放比例
+		/// 对应 RefreshAsSpine 中的逻辑
+		/// </summary>
+		private static float GetSpineScale(SpineConfig spineConfig, TaiwuAvatarSize size)
+		{
+			switch (size)
+			{
+				case TaiwuAvatarSize.Big:
+					return spineConfig.scaleBig;
+				case TaiwuAvatarSize.Normal:
+					return spineConfig.scaleNormal;
+				case TaiwuAvatarSize.Small:
+					return spineConfig.scaleSmall;
+				default:
+					return spineConfig.scaleBig;
+			}
+		}
+
+		private static bool TryTexture(TaiwuAvatar avatar, CharacterAvatar? instance, string avatarAssetName)
+		{
+			var loadMod = GetResPath(avatarAssetName, avatar.Size, out var resPath);
+			if (string.IsNullOrEmpty(resPath)) return false;// 报错出来
 
 			// 游戏内资源
-            if (!loadMod)
-            {
-				// 尝试进行动态立绘
-				var toSpine = false;
-				var isSpine = false;
-				if (avatar.PreferDynamicAvatar)
-				{
-					if(samllSpine || (!samllSpine && avatar.size != TaiwuAvatarSize.Small))
-					{
-						var npcSkeleton = Traverse.Create(avatar).Field("npcSkeleton").GetValue<SkeletonGraphic>();
-						if (npcSkeleton != null)
-							toSpine = true;
-					}
-				}
-				if(toSpine)
-				{
-					if(ImgTemplate.TryGetValue(avatarAssetName, out int characterTemplateId))
-					{
-						CharacterItem config = Character.Instance[characterTemplateId];
-						string spineName = config.FixedAvatarSpineName;
-						string skinName = config.FixedAvatarSpineSkin;
-						if(!string.IsNullOrEmpty(spineName))
-						{
-							isSpine = true;
-							avatar.RefreshAsSpine(spineName, skinName);
-							return true;
-						}
-					}
-				}
-
+			if (!loadMod)
+			{
 				// 否则静态
-                ResLoader.LoadModOrGameResource<Texture2D>(resPath, delegate (Texture2D tex)
-                {
-                    if (avatar == null) return;
-                    avatar.Refresh(tex);
-                    if (instance == null) return;
-                    instance.OnFillAvatar?.Invoke(); // CharacterAvatar 非空时触发回调
-				}, (tex) => {
-                });
-                return true;
-            }
+				ResLoader.LoadModOrGameResource<Texture2D>(resPath, delegate (Texture2D tex)
+				{
+					if (avatar == null) return;
+					avatar.Refresh(tex);
+					if (instance == null) return;
+					instance.OnFillAvatar?.Invoke(); // CharacterAvatar 非空时触发回调
+				}, (tex) =>
+				{
+				});
+				return true;
+			}
 			// 自定义资源
 			else
 			{
-                var tex = TryLoadImg(resPath);
-                if(tex == null) return false;
-                avatar.Refresh(tex);
-                if (instance == null) return true; // 上面已经替换成功了，这里只是检查是否要回调
-                instance.OnFillAvatar?.Invoke();
-                return true;
-            }
-        }
+				var tex = TryLoadImg(resPath);
+				if (tex == null) return false;
+				avatar.Refresh(tex);
+				if (instance == null) return true; // 上面已经替换成功了，这里只是检查是否要回调
+				instance.OnFillAvatar?.Invoke();
+				return true;
+			}
+		}
 
 		/// <summary>
 		/// 解析 资源名配置， 尝试读取资源
@@ -1058,11 +1384,10 @@ namespace NpcFace
 		/// </summary>
         private static bool GetResPath(string avatarAssetName, TaiwuAvatarSize avatarSize, out string resPath)
         {
-            //MyLog($"GetResPath {avatarAssetName}");
-            var dir = TryLoadResDir(avatarAssetName, out var relName);
-            //MyLog($"GetResPath {dir}");
+            var dir = TryLoadResDir(avatarAssetName, out var fileName);
+			var relName = fileName + ".png";
 			// 路径非空 为自定义资源
-            if (!string.IsNullOrEmpty(dir)) // resDirs 0 是空字符串
+			if (!string.IsNullOrEmpty(dir)) // resDirs 0 是空字符串
             {
                 // 先检查 BigTexture mod路径，再检查 BigFace 路径
                 var size1 = GetSizeFolder(avatarSize, 1);
@@ -1093,17 +1418,17 @@ namespace NpcFace
 		/// 解析获取自定义路径
 		/// 根据`:`前的tag，从 tagDirs 中 找到对应的路径
 		/// </summary>
-		public static string TryLoadResDir(string avatarAssetName, out string relName)
+		public static string TryLoadResDir(string avatarAssetName, out string fileName)
         {
             //MyLog($"TryLoadResDir {avatarAssetName}");
             var r = avatarAssetName.Split(':');
             if (r.Length > 1)
             {
-                //MyLog($"TryLoadResDir {r[0]} {r[1]}");
-                relName = r[1] + ".png";
+				//MyLog($"TryLoadResDir {r[0]} {r[1]}");
+				fileName = r[1];
                 return tagDirs[r[0]];
             }
-            relName = "";
+			fileName = "";
             return "";
         }
 
