@@ -1081,11 +1081,11 @@ namespace NpcFace
 
 			sc.skinName = doc.Descendants("skin").FirstOrDefault()?.Value ?? "";
 			sc.animName = doc.Descendants("anim").FirstOrDefault()?.Value ?? "";
-			sc.scaleBig = float.Parse(doc.Descendants("scaleBig").FirstOrDefault()?.Value);
-			sc.scaleNormal = float.Parse(doc.Descendants("scaleNormal").FirstOrDefault()?.Value);
-			sc.scaleSmall = float.Parse(doc.Descendants("scaleSmall").FirstOrDefault()?.Value);
-			sc.offsetX = float.Parse(doc.Descendants("offsetX").FirstOrDefault()?.Value);
-			sc.offsetY = float.Parse(doc.Descendants("offsetY").FirstOrDefault()?.Value);
+			sc.scaleBig = float.Parse(doc.Descendants("scaleBig").FirstOrDefault()?.Value ?? "1");
+			sc.scaleNormal = float.Parse(doc.Descendants("scaleNormal").FirstOrDefault()?.Value ?? "0.5");
+			sc.scaleSmall = float.Parse(doc.Descendants("scaleSmall").FirstOrDefault()?.Value ?? "1");
+			sc.offsetX = float.Parse(doc.Descendants("offsetX").FirstOrDefault()?.Value ?? "0");
+			sc.offsetY = float.Parse(doc.Descendants("offsetY").FirstOrDefault()?.Value ?? "0");
 			return sc;
 		}
 
