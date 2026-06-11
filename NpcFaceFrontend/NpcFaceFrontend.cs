@@ -279,8 +279,12 @@ namespace NpcFace
 			public float scaleBig = 1.0f;
 			public float scaleNormal = 0.5f;
 			public float scaleSmall = 1.0f;
-			public float offsetX = 0f;
-			public float offsetY = 0f;
+			public float bigOffsetX = 0f;
+			public float bigOffsetY = 0f;
+			public float normalOffsetX = 0f;
+			public float noramlOffsetY = 0f;
+			public float smallOffsetX = 0f;
+			public float smallOffsetY = 0f;
 
 		}
 		// spine 配置缓存； 设置变化的是否清零；
@@ -707,23 +711,40 @@ namespace NpcFace
 
 		public static string TryGetNpcNameSp(Transform transform)
 		{
-			// 地图人物列表
-			if (transform.GetComponent<MapBlockChar>()) 
+			// 地图人物列表 关注界面
+			if (transform.parent.name == "AvatarRect")
 			{
-				return transform.GetChild(2).GetComponent<TextMeshProUGUI>().text;
+				// 地图人物列表
+				var mbc = transform.parent.parent.GetComponent<MapBlockChar>();
+				if (mbc)
+				{
+					var t = Traverse.Create(mbc).Field("nameText").GetValue<TextMeshProUGUI>();
+					if (t) return t.text;
+					else { MyUtils.MyLog("地块人物列表更新， 需要适配"); return null; }
+				}
+				var fc = transform.parent.parent.GetComponent<Game.Views.MapBlockCharList.FollowingChar>();
+				if (fc)
+				{
+					var t = Traverse.Create(fc).Field("nameText").GetValue<TextMeshProUGUI>();
+					if (t) return t.text;
+					else { MyUtils.MyLog("关注界面 需要适配"); return null; }
+				}
 			}
 			// 地图界面下方人物
-			if(transform.GetComponentInParent<ViewBottom>())
+			if(UIElement.Bottom.Exist)
 			{
-				if (transform.name.StartsWith("MainChar"))
+				if (transform.GetComponentInParent<ViewBottom>())
 				{
-					return SingletonObject.getInstance<BasicGameData>().TaiwuMonasticTitleOrDisplayName;
+					if (transform.name.StartsWith("MainChar"))
+					{
+						return SingletonObject.getInstance<BasicGameData>().TaiwuMonasticTitleOrDisplayName;
+					}
+					if (transform.name.StartsWith("Teammate1")) return TryGetTeammateName(1);
+					if (transform.name.StartsWith("Teammate2")) return TryGetTeammateName(2);
+					if (transform.name.StartsWith("Teammate3")) return TryGetTeammateName(3);
 				}
-				if (transform.name.StartsWith("Teammate1")) return TryGetTeammateName(1);
-				if (transform.name.StartsWith("Teammate2")) return TryGetTeammateName(2);
-				if (transform.name.StartsWith("Teammate3")) return TryGetTeammateName(3);
 			}
-			// 装备界面
+			// 装备界面 战斗界面同道
 			if (transform.parent.name == "SoftMask")
 			{
 				if(transform.parent.parent.parent.name == "CharacterCircle") // 装备界面
@@ -746,25 +767,17 @@ namespace NpcFace
 							}
 						}
 					}
-
-					// // 太吾有点搞，名字没转化
-					// var cc = transform.parent.parent.parent.GetComponent<CharacterCircle>();
-					// var characterNameAndTitle = Traverse.Create(cc).Field("characterNameAndTitle").GetValue<NameAndTitle>();
-					// var name = Traverse.Create(characterNameAndTitle).Field("characterName").GetValue<Name>();
-					// var label = Traverse.Create(name).Field("label").GetValue<TextMeshProUGUI>();
-					// return label.text;
 				}
-			}
-			//  战斗界面同道 治疗界面 势力界面 秘闻界面
-			if (transform.parent.name == "AvatarMask") 
-			{
 				//  战斗界面同道
-				var ct = transform.parent.parent.GetComponent<CombatTeammate>();
+				var ct = transform.parent.parent.parent.GetComponent<CombatTeammate>();
 				if (ct)
 				{
 					return Traverse.Create(ct).Field("teammateName").GetValue<TextMeshProUGUI>().text;
 				}
-
+			}
+			//  治疗界面 势力界面 秘闻界面
+			if (transform.parent.name == "AvatarMask") 
+			{
 				// 治疗界面
 				var hc = transform.parent.parent.GetComponent<HealChar>();
 				if(hc)
@@ -811,21 +824,27 @@ namespace NpcFace
 				var p4 = transform.parent.parent.parent.parent;
 				if(p4.GetComponent<AssignPageVillagerView>())
 				{
-					return p4.GetChild(4).GetChild(0).GetComponent<TextMeshProUGUI>().text;
+					var t = p4.GetChild(4).GetChild(0).GetComponent<TextMeshProUGUI>();
+					if(t) return t.text;
+					else { MyUtils.MyLog("身份名册 需要适配"); return null; }
 				}
 			}
-			// 关注界面
-			if (transform.parent.name == "AvatarRect")
+			// 地块右键界面（派遣）
+			if (UIElement.BlockOperation.Exist)
 			{
-				var fc = transform.parent.parent.GetComponent<Game.Views.MapBlockCharList.FollowingChar>();
-				if(fc)
+				if (transform.parent.parent.name == "AssignedCharacterButton")
 				{
-					return fc.transform.GetChild(3).GetChild(2).GetComponent<TextMeshProUGUI>().text;
+					var p3 = transform.parent.parent.parent;
+					if (p3.GetComponent<AssignedCharacterButton>())
+					{
+						var t = p3.GetChild(2).GetComponent<TextMeshProUGUI>();
+						if (t) return t.text;
+						else { MyUtils.MyLog("地块右键界面（派遣） 需要适配"); return null; }
+					}
 				}
 			}
 
 			return null;
-
 		}
 
 		public static string TryGetTeammateName(int index)
@@ -1084,8 +1103,12 @@ namespace NpcFace
 			sc.scaleBig = float.Parse(doc.Descendants("scaleBig").FirstOrDefault()?.Value ?? "1");
 			sc.scaleNormal = float.Parse(doc.Descendants("scaleNormal").FirstOrDefault()?.Value ?? "0.5");
 			sc.scaleSmall = float.Parse(doc.Descendants("scaleSmall").FirstOrDefault()?.Value ?? "1");
-			sc.offsetX = float.Parse(doc.Descendants("offsetX").FirstOrDefault()?.Value ?? "0");
-			sc.offsetY = float.Parse(doc.Descendants("offsetY").FirstOrDefault()?.Value ?? "0");
+			sc.bigOffsetX = float.Parse(doc.Descendants("bigOffsetX").FirstOrDefault()?.Value ?? "0");
+			sc.bigOffsetY = float.Parse(doc.Descendants("bigOffsetY").FirstOrDefault()?.Value ?? "0");
+			sc.normalOffsetX = float.Parse(doc.Descendants("normalOffsetX").FirstOrDefault()?.Value ?? "0");
+			sc.noramlOffsetY = float.Parse(doc.Descendants("noramlOffsetY").FirstOrDefault()?.Value ?? "0");
+			sc.smallOffsetX = float.Parse(doc.Descendants("smallOffsetX").FirstOrDefault()?.Value ?? "0");
+			sc.smallOffsetY = float.Parse(doc.Descendants("smallOffsetY").FirstOrDefault()?.Value ?? "0");
 			return sc;
 		}
 
@@ -1277,7 +1300,7 @@ namespace NpcFace
 				if(!npcSkeleton.gameObject.activeSelf)
 					npcSkeleton.gameObject.SetActive(true);
 				// 应用偏移（使用 Traverse 调用私有方法）
-				var o = new Vector2(spineConfig.offsetX, spineConfig.offsetY);
+				var o = GetSpineOffset(spineConfig, avatar.Size);
 				Traverse.Create(avatar).Method("ApplyAvatarOffset", o).GetValue();
 			}
 			else
@@ -1313,7 +1336,7 @@ namespace NpcFace
 				Traverse.Create(avatar).Field("_currentSpineName").SetValue(spineName);
 				Traverse.Create(avatar).Field("_currentSpineSkin").SetValue(skinName);
 				// 应用偏移
-				var o = new Vector2(spineConfig.offsetX, spineConfig.offsetY);
+				var o = GetSpineOffset(spineConfig, avatar.Size);
 				Traverse.Create(avatar).Method("ApplyAvatarOffset", o).GetValue();
 			}
 
@@ -1326,8 +1349,25 @@ namespace NpcFace
 		}
 
 		/// <summary>
+		/// 根据 AvatarSize 获取 spine 位移比例
+		/// </summary>
+		private static Vector2 GetSpineOffset(SpineConfig spineConfig, TaiwuAvatarSize size)
+		{
+			switch (size)
+			{
+				case TaiwuAvatarSize.Big:
+					return new Vector2(spineConfig.bigOffsetX, spineConfig.bigOffsetY);
+				case TaiwuAvatarSize.Normal:
+					return new Vector2(spineConfig.normalOffsetX, spineConfig.noramlOffsetY);
+				case TaiwuAvatarSize.Small:
+					return new Vector2(spineConfig.smallOffsetX, spineConfig.smallOffsetY);
+				default:
+					return new Vector2(0,0);
+			}
+		}
+
+		/// <summary>
 		/// 根据 AvatarSize 获取 spine 缩放比例
-		/// 对应 RefreshAsSpine 中的逻辑
 		/// </summary>
 		private static float GetSpineScale(SpineConfig spineConfig, TaiwuAvatarSize size)
 		{
