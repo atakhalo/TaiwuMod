@@ -1,0 +1,23 @@
+<!--
+config.xml 放在spine下人物文件夹里，配置字段以太吾迎娇下的模版config.xml为准
+	会在显示立绘时读取，读取后缓存；mod设置有修改时会触发刷新，可以随便找个开关点两下然后应用, 有问题就重开游戏吧
+altas: spine图集默认读取同名png，如果需要多个图集，则在 altas 中 用file 列举，, 不用加png
+skin 需要 指定皮肤，则使用 skin 指定，否则不用写
+anim: 需要 指定动画，则使用 anim 指定，否则不用写
+scale: scaleBig scaleNormal scaleSmall 等是在不同显示区域的缩放比例; 默认 big 1， normal 0.5 scaleSmall 1 (因为游戏里small不动态)
+offset: bigOffsetX bigOffsetX noramlOffsetX, noramlOffsetY 等为位移，不需要就不用写
+	注意有些地方位移会导致人物不见(如对话窗口-65)
+-->
+
+<root>
+    <altas>
+        <file>图集1</file>
+        <file>图集2</file>
+    </altas>
+    <anim>animation</anim>
+    <skin>00</skin>
+	<scaleBig>0.4</scaleBig>
+	<scaleNormal>0.2</scaleNormal>
+	<bigOffsetY>-50</bigOffsetY>
+	<noramlOffsetY>-50</noramlOffsetY>
+</root>
