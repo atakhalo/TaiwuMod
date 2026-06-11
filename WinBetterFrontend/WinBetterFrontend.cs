@@ -275,8 +275,8 @@ namespace WinBetter
                 ? combatValue.GetTotal() - cur
                 : value.GetTotal() - cur;
 
-			if(!__instance.neiliText.text.Contains('\n')) // 防止重复添加
-				__instance.neiliText.text = __instance.neiliText.text + $"\n真气：{cur}/{max}/{cur+sum}";
+			if(__instance.neiliAllocationText.text.Count(c => c == '/') >= 2) // 防止重复添加
+				__instance.neiliAllocationText.text = __instance.neiliAllocationText.text + $"/{cur+sum}";
         }
 
         private static string GetNumInColor(string input)
