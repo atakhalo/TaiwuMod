@@ -291,11 +291,6 @@ namespace NpcFace
 		// 记录 配置文件名 对应 spine 配置 （如 皮肤、皮肤图集、默认动画）
 		public static Dictionary<string, SpineConfig> spineConfigs = new Dictionary<string, SpineConfig>();
 
-		public static void MyLog(string log)
-        {
-			// MyUtils.MyLog(log);
-        }
-
         public override void Initialize()
         {
 			MyUtils.MyLog("Initialize");
@@ -399,7 +394,7 @@ namespace NpcFace
                 {
                     var dirPath = Path.Combine(modInfo.DirectoryName, dir);
                     tagDirs[tag] = dirPath;
-                    MyLog($"太吾迎娇 收集到图片目录 {tagDirs.Count} {tag}:{dirPath} ");
+                    MyUtils.MyLog($"太吾迎娇 收集到图片目录 {tagDirs.Count} {tag}:{dirPath} ");
                 }
             }
 		}
@@ -889,112 +884,197 @@ namespace NpcFace
 		#endregion
 
 		#region hook 游戏中的加载接口，然后寻找name进行立绘替换
-		[HarmonyPostfix, HarmonyPatch(typeof(TaiwuAvatar), "Refresh", argumentTypes: new Type[2] { typeof(CharacterDisplayData), typeof(bool) })]
-        public static void OnRefreshChar(TaiwuAvatar __instance, CharacterDisplayData displayData, bool isShowGrave)
+		public static bool QuickCheckNoInit(TaiwuAvatar __instance)
+		{
+			var ac = Traverse.Create(__instance).Field("avatarContainer").GetValue<GameObject>();
+			var gc = Traverse.Create(__instance).Field("gravestoneContainer").GetValue<GameObject>();
+			bool noInit = false;
+			if(ac.activeSelf && gc.activeSelf) noInit = true;
+			// MyUtils.MyLog($"QuickCheckNoInit {noInit}");
+			if(!noInit) return false;
+			for (int i = 0; i < __instance.transform.childCount; i++)
+			{
+				__instance.transform.GetChild(i).gameObject.SetActive(false);
+			}
+			return true;
+		}
+
+		[HarmonyPrefix, HarmonyPatch(typeof(TaiwuAvatar), "Refresh", argumentTypes: new Type[2] { typeof(CharacterDisplayData), typeof(bool) })]
+		public static bool OnRefreshChar_Dis_Pre(TaiwuAvatar __instance, CharacterDisplayData displayData, bool isShowGrave)
+		{
+			if (!npcFace) return true;
+			QuickCheckNoInit(__instance);
+			GameApp.Instance.StartCoroutine(DelayCoroutine_OnRefreshChar_Dis(OnRefreshChar_Dis_Wrapper, 0, __instance, displayData, isShowGrave));
+			return false;
+		}
+
+		private static IEnumerator DelayCoroutine_OnRefreshChar_Dis(Func<TaiwuAvatar, CharacterDisplayData, bool, bool> action, float delay, TaiwuAvatar avatar, CharacterDisplayData displayData, bool isShowGrave)
+		{
+			yield return null;
+			//yield return new WaitForSeconds(delay);
+			action?.Invoke(avatar, displayData, isShowGrave);
+		}
+
+		public static bool OnRefreshChar_Dis_Wrapper(TaiwuAvatar __instance, CharacterDisplayData displayData, bool isShowGrave)
+		{
+			if (OnRefreshChar_Dis(__instance, displayData, isShowGrave)) return true;
+			else OnRefreshChar_Dis_Origin(__instance, displayData, isShowGrave); return false;
+		}
+
+		[HarmonyReversePatch, HarmonyPatch(typeof(TaiwuAvatar), "Refresh", argumentTypes: new Type[2] { typeof(CharacterDisplayData), typeof(bool) })]
+		public static void OnRefreshChar_Dis_Origin(TaiwuAvatar __instance, CharacterDisplayData displayData, bool isShowGrave)
+		{
+			return;
+		}
+
+		// [HarmonyPostfix, HarmonyPatch(typeof(TaiwuAvatar), "Refresh", argumentTypes: new Type[2] { typeof(CharacterDisplayData), typeof(bool) })]
+        public static bool OnRefreshChar_Dis(TaiwuAvatar __instance, CharacterDisplayData displayData, bool isShowGrave)
         {
-            if (!npcFace) return;
-			if(isShowGrave) return;
+            if (!npcFace) return false;
+			if(isShowGrave) return false;
 
             var charId = displayData.CharacterId;
             var taiwuCharId = SingletonObject.getInstance<BasicGameData>().TaiwuCharId;
             if(displayData.CharacterId == taiwuCharId)
             {
-                resLoad(__instance, null, isTaiwu:true);
-                return;
+                return resLoad(__instance, null, isTaiwu:true);
             }
-            TrySetNpcFaceByName(__instance, null, displayData);
-            //TrySetNpcFace(__instance, null, displayData);
+            return TrySetNpcFaceByName(__instance, null, displayData);
         }
 
-        // 关系界面 主体
-        [HarmonyPostfix, HarmonyPatch(typeof(TaiwuAvatar), "Refresh", argumentTypes: new Type[1] { typeof(AvatarRelatedData) })]
-        public static void OnRefreshCharRelated(TaiwuAvatar __instance, AvatarRelatedData relatedData)
+		[HarmonyPrefix, HarmonyPatch(typeof(TaiwuAvatar), "Refresh", argumentTypes: new Type[1] { typeof(AvatarRelatedData) })]
+		public static bool OnRefreshChar_Related_Pre(TaiwuAvatar __instance, AvatarRelatedData relatedData)
+		{
+			if (!npcFace) return true;
+			QuickCheckNoInit(__instance);
+			GameApp.Instance.StartCoroutine(DelayCoroutine_OnRefreshChar_Related(OnRefreshChar_Related_Wrapper, 0, __instance, relatedData));
+			return false;
+		}
+
+		private static IEnumerator DelayCoroutine_OnRefreshChar_Related(
+			Func<TaiwuAvatar, AvatarRelatedData, bool> action, float delay, TaiwuAvatar avatar, AvatarRelatedData relatedData)
+		{
+			yield return null;
+			//yield return new WaitForSeconds(delay);
+			action?.Invoke(avatar, relatedData);
+		}
+
+		public static bool OnRefreshChar_Related_Wrapper(TaiwuAvatar __instance, AvatarRelatedData relatedData)
+		{
+			if(!__instance || !__instance.gameObject) return true;
+			if (OnRefreshChar_Related(__instance, relatedData)) return true;
+			else OnRefreshChar_Related_Origin(__instance, relatedData); return false;
+		}
+
+		[HarmonyReversePatch, HarmonyPatch(typeof(TaiwuAvatar), "Refresh", argumentTypes: new Type[1] { typeof(AvatarRelatedData) })]
+		public static void OnRefreshChar_Related_Origin(TaiwuAvatar __instance, AvatarRelatedData relatedData)
+		{
+			return;
+		}
+
+		// [HarmonyPrefix, HarmonyPatch(typeof(TaiwuAvatar), "ShowNormalState")]
+		// public static bool ShowNormalState_Pre(TaiwuAvatar __instance)
+		// {
+		// 	if(__instance.gameObject == null) return false;
+		// 	return true;
+		// 	var ac = Traverse.Create(__instance).Field("avatarContainer").GetValue<GameObject>();
+		// 	if(ac) ac.SetActive(true);
+		// 	else {MyUtils.MyLog("没有ac"); MyUtils.ShowMono(__instance.gameObject);}
+		// 	var gc = Traverse.Create(__instance).Field("gravestoneContainer").GetValue<GameObject>();
+		// 	if(gc) gc.SetActive(false);
+		// 	else { MyUtils.MyLog("没有gc"); MyUtils.ShowMono(__instance.gameObject); }
+		// }
+
+		// 关系界面 主体
+		// [HarmonyPostfix, HarmonyPatch(typeof(TaiwuAvatar), "Refresh", argumentTypes: new Type[1] { typeof(AvatarRelatedData) })]
+		public static bool OnRefreshChar_Related(TaiwuAvatar __instance, AvatarRelatedData relatedData)
         {
-            if (!npcFace) return;
-            //MyLog("OnRefreshCharRelated");
-            DelayCall(__instance, relatedData);
+            if (!npcFace) return false;
+			//MyLog("OnRefreshCharRelated");
+			return TrySetNpcFaceByName(__instance, null, relatedData);
+			// DelayCall(__instance, relatedData);
         }
 
-        public static void DelayCall(TaiwuAvatar avatar, AvatarRelatedData relatedData)
-        {
-            //Game.Instance.StartCoroutine(DelayCoroutine(TrySetNpcFace, 0, avatar, null, relatedData));
-            GameApp.Instance.StartCoroutine(DelayCoroutine(TrySetNpcFaceByName, 0, avatar, null, relatedData));
-        }
+		// public static void DelayCall(TaiwuAvatar avatar, AvatarRelatedData relatedData)
+		// {
+		//     //Game.Instance.StartCoroutine(DelayCoroutine(TrySetNpcFace, 0, avatar, null, relatedData));
+		//     GameApp.Instance.StartCoroutine(DelayCoroutine(TrySetNpcFaceByName, 0, avatar, null, relatedData));
+		// }
 
-        private static IEnumerator DelayCoroutine(Func<TaiwuAvatar, CharacterAvatar, AvatarRelatedData, bool> action, float delay, TaiwuAvatar avatar, CharacterAvatar instance, AvatarRelatedData relatedData)
-        {
-            yield return null;
-            //yield return new WaitForSeconds(delay);
-            action?.Invoke(avatar, instance, relatedData);
-        }
+		// private static IEnumerator DelayCoroutine(Func<TaiwuAvatar, CharacterAvatar, AvatarRelatedData, bool> action, float delay, TaiwuAvatar avatar, CharacterAvatar instance, AvatarRelatedData relatedData)
+		// {
+		//     yield return null;
+		//     //yield return new WaitForSeconds(delay);
+		//     action?.Invoke(avatar, instance, relatedData);
+		// }
 
-        // 人物界面, 
-        [HarmonyReversePatch, HarmonyPatch(typeof(CharacterAvatar), "FillElement")]
-        public static void FillElementOrigin(CharacterAvatar __instance)
+		[HarmonyPrefix, HarmonyPatch(typeof(CharacterAvatar), "FillElement")]
+		public static bool FillElement_Pre(CharacterAvatar __instance)
+		{
+			if (!npcFace) return true;
+			var avatar = Traverse.Create(__instance).Field("_avatar").GetValue<TaiwuAvatar>();
+			QuickCheckNoInit(avatar);
+			GameApp.Instance.StartCoroutine(DelayCoroutine_FillElement(FillElement_Wrapper, 0, __instance));
+			return false;
+		}
+		private static IEnumerator DelayCoroutine_FillElement(Func<CharacterAvatar, bool> action, float delay, CharacterAvatar avatar)
+		{
+			yield return null;
+			//yield return new WaitForSeconds(delay);
+			action?.Invoke(avatar);
+		}
+
+		public static bool FillElement_Wrapper(CharacterAvatar avatar)
+		{
+			if (FillElement_Post(avatar)) return true;
+			else FillElement_Origin(avatar); return false;
+		}
+
+		// 人物界面, 
+		[HarmonyReversePatch, HarmonyPatch(typeof(CharacterAvatar), "FillElement")]
+        public static void FillElement_Origin(CharacterAvatar __instance)
         {
             return;
         }
 
         // 人物界面, 
-        [HarmonyPostfix, HarmonyPatch(typeof(CharacterAvatar), "FillElement")]
-        public static void FillElementPost(CharacterAvatar __instance)
+        // [HarmonyPostfix, HarmonyPatch(typeof(CharacterAvatar), "FillElement")]
+        public static bool FillElement_Post(CharacterAvatar __instance)
         {
-            if (!npcFace) return;
+            if (!npcFace) return false;
             // MyUtils.MyLog($"FillElementPost");
-            if (__instance == null) return;
+            if (__instance == null) return false;
             var taiwuCharId = SingletonObject.getInstance<BasicGameData>().TaiwuCharId;
             if (__instance.CharacterId == taiwuCharId)
             {
                 var avatar = Traverse.Create(__instance).Field("_avatar").GetValue<TaiwuAvatar>();
-                resLoad(avatar, __instance, isTaiwu: true);
-                return;
+                return resLoad(avatar, __instance, isTaiwu: true);
             }
             else
             {
-
                 var avatar = Traverse.Create(__instance).Field("_avatar").GetValue<TaiwuAvatar>();
-                //MyLog($"FillElementPost 1");
-                TrySetNpcFaceByName(avatar, __instance, relatedData: null);
-                //MyLog($"FillElementPost 1-1");
-                DelayCall2(avatar, __instance, null);
+                return TrySetNpcFaceByName(avatar, __instance, relatedData: null);
+                // DelayCall2(avatar, __instance, null);
             }
         }
 
-        public static void DelayCall2(TaiwuAvatar avatar, CharacterAvatar instance, AvatarRelatedData relatedData)
-        {
-            //Game.Instance.StartCoroutine(DelayCoroutine(TrySetNpcFace, 0, avatar, null, relatedData));
-            GameApp.Instance.StartCoroutine(DelayCoroutine2(TrySetNpcFaceByName, avatar, instance, relatedData));
-        }
+        // public static void DelayCall2(TaiwuAvatar avatar, CharacterAvatar instance, AvatarRelatedData relatedData)
+        // {
+        //     //Game.Instance.StartCoroutine(DelayCoroutine(TrySetNpcFace, 0, avatar, null, relatedData));
+        //     GameApp.Instance.StartCoroutine(DelayCoroutine2(TrySetNpcFaceByName, avatar, instance, relatedData));
+        // }
 
-        private static IEnumerator DelayCoroutine2(Func<TaiwuAvatar, CharacterAvatar, AvatarRelatedData, bool> action, TaiwuAvatar avatar, CharacterAvatar instance, AvatarRelatedData relatedData)
-        {
-            yield return new WaitForSecondsRealtime(0);
-            if (avatar == null || instance == null) yield break;
-            //MyLog($"FillElementPost 2");
-            if (!action.Invoke(avatar, instance, relatedData)) { try { FillElementOrigin(instance); } catch { } }
-            //MyLog($"FillElementPost 2-1");
+        // private static IEnumerator DelayCoroutine2(Func<TaiwuAvatar, CharacterAvatar, AvatarRelatedData, bool> action, TaiwuAvatar avatar, CharacterAvatar instance, AvatarRelatedData relatedData)
+        // {
+        //     yield return new WaitForSecondsRealtime(0);
+        //     if (avatar == null || instance == null) yield break;
+        //     if (!action.Invoke(avatar, instance, relatedData)) { try { FillElementOrigin(instance); } catch { } }
+        //     yield return new WaitForSecondsRealtime(0.05f);
+        //     if (avatar == null || instance == null) yield break;
+        //     if (!action.Invoke(avatar, instance, relatedData)) { try { FillElementOrigin(instance); } catch { } }
+        // }
 
-            //yield return new WaitForSecondsRealtime(0.01f);
-            //if (avatar == null) yield break;
-            //MyLog($"FillElementPost 3");
-            //if (!action.Invoke(avatar, instance, relatedData)) { avatar.Refresh(); }
-            //MyLog($"FillElementPost 3-1");
 
-            yield return new WaitForSecondsRealtime(0.05f);
-            if (avatar == null || instance == null) yield break;
-            //MyLog($"FillElementPost 4");
-            if (!action.Invoke(avatar, instance, relatedData)) { try { FillElementOrigin(instance); } catch { } }
-            //MyLog($"FillElementPost 4-1");
-
-            //yield return new WaitForSecondsRealtime(0.1f);
-            //if (avatar == null) yield break;
-            //if (!action.Invoke(avatar, instance, relatedData)) { avatar.Refresh(); }
-            //yield return new WaitForSecondsRealtime(0.5f);
-            //if (avatar == null) yield break;
-            //MyLog($"FillElementPost 6");
-            //if (!action.Invoke(avatar, instance, relatedData)) { avatar.Refresh(); }
-            //MyLog($"FillElementPost 6-1");
-        }
 
 		#endregion
 
@@ -1292,7 +1372,9 @@ namespace NpcFace
 			var spineName = spineConfig.keyName;
 			var skinName = spineConfig.skinName;
 			var _currentSpineName = Traverse.Create(avatar).Field("_currentSpineName").GetValue<string>();
-			bool isSameSpine = _currentSpineName == spineName;
+			var _currentSpineSkin = Traverse.Create(avatar).Field("_currentSpineSkin").GetValue<string>();
+			bool isSameSpine = _currentSpineName == spineName && _currentSpineSkin == skinName;
+			// MyUtils.MyLog($"TryApplySpineAsset {_currentSpineName} :{spineName}; {_currentSpineSkin} == {skinName}");
 			if(isSameSpine && npcSkeleton.gameObject.activeSelf)
 			{
 				float spineScale = GetSpineScale(spineConfig, avatar.Size);
