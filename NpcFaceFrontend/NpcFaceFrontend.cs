@@ -256,7 +256,7 @@ namespace NpcFace
         public static bool toReadFile = false;
 
         public static List<string> resDirs = new List<string>(); // 资源路径
-        public static Dictionary<string, Texture2D> resCache = new Dictionary<string, Texture2D>();
+        public static Dictionary<string, Sprite> resCache = new Dictionary<string, Sprite>();
 
         public static Dictionary<string, string> tagDirs = new Dictionary<string, string>(); // 资源tag对应路径
 
@@ -1386,7 +1386,9 @@ namespace NpcFace
 
 		private static bool TryTexture(TaiwuAvatar avatar, CharacterAvatar? instance, string avatarAssetName)
 		{
-			var loadMod = GetResPath(avatarAssetName, avatar.Size, out var resPath);
+			// resPath是资源路径，fallBig 时指向bigsize资源
+			// oriPath是原请求路径
+			var loadMod = GetResPath(avatarAssetName, avatar.Size, out var resPath, out var fallBig, out var oriPath);
 			if (string.IsNullOrEmpty(resPath)) return false;// 报错出来
 
 			// 游戏内资源
@@ -1407,9 +1409,25 @@ namespace NpcFace
 			// 自定义资源
 			else
 			{
-				var tex = TryLoadImg(resPath);
-				if (tex == null) return false;
-				avatar.Refresh(tex);
+				Sprite sprite;
+				// 获取缓存 sprite，根据 resPath 缓存
+				// 如果 fallBig 时 根据不同size创建不同sprite，则用 oriPath 做key
+				if (!resCache.TryGetValue(resPath, out sprite))  
+				{
+					Texture2D texture = TryLoadImg(resPath);
+					if (texture == null) return false;
+					sprite = Sprite.Create(texture, new Rect(0f, 0f, texture.width, texture.height), 0.5f * Vector2.one);
+					sprite.name = texture.name;
+					resCache[resPath] = sprite;
+				}
+				if (sprite == null) return false;
+				avatar.Refresh(sprite);
+				if(fallBig)
+				{
+					var i = Traverse.Create(avatar).Field("cloth").GetValue<CImage>();
+					i.rectTransform.sizeDelta = GetSizeWH(avatar.Size);
+				}
+
 				if (instance == null) return true; // 上面已经替换成功了，这里只是检查是否要回调
 				instance.OnFillAvatar?.Invoke();
 				return true;
@@ -1422,24 +1440,20 @@ namespace NpcFace
 		/// 没有则是游戏内资源
 		/// bool 返回是否自定义还是游戏内
 		/// </summary>
-        private static bool GetResPath(string avatarAssetName, TaiwuAvatarSize avatarSize, out string resPath)
+        private static bool GetResPath(string avatarAssetName, TaiwuAvatarSize avatarSize, out string resPath, out bool fallBig, out string oriPath)
         {
             var dir = TryLoadResDir(avatarAssetName, out var fileName);
 			var relName = fileName + ".png";
+			fallBig = false;
+			oriPath = null;
 			// 路径非空 为自定义资源
 			if (!string.IsNullOrEmpty(dir)) // resDirs 0 是空字符串
             {
-                // 先检查 BigTexture mod路径，再检查 BigFace 路径
-                var size1 = GetSizeFolder(avatarSize, 1);
-                var res1 = Path.Combine(dir, size1, relName);
-                //MyLog($"GetResPath res1 {res1}");
-                if (File.Exists(res1)) { resPath = res1; return true; }
-                var size0 = GetSizeFolder(avatarSize, 0);
-                var res0 = Path.Combine(dir, size0, relName);
-                //MyLog($"GetResPath res0 {res0}");
-                if (File.Exists(res0)) { resPath = res0; return true; }
-                //MyLog($"GetResPath no");
-                resPath = "";
+				resPath = CheckSizePath(avatarSize, 0, dir, relName, out fallBig, out oriPath);
+				if (resPath != null) { return true;}
+				resPath = CheckSizePath(avatarSize, 1, dir, relName, out fallBig, out oriPath);
+				if (resPath != null) { return true; }
+				resPath = "";
                 return true;
             }
 			// 空路径为游戏内资源
@@ -1453,6 +1467,23 @@ namespace NpcFace
             resPath = "";
             return false;
         }
+
+		public static string CheckSizePath(TaiwuAvatarSize avatarSize, int pathType, string dir, string relName, out bool fallBig, out string oriPath)
+		{
+			fallBig = false;
+			var size0 = GetSizeFolder(avatarSize, pathType);
+			var res0 = Path.Combine(dir, size0, relName);
+			oriPath = res0;
+			if(File.Exists(res0)) return res0;
+			else
+			{
+				fallBig = true;
+				size0 = GetSizeFolder(TaiwuAvatarSize.Big, pathType);
+				res0 = Path.Combine(dir, size0, relName);
+				if (File.Exists(res0)) return res0;
+				return null;
+			}
+		}
 
 		/// <summary>
 		/// 解析获取自定义路径
@@ -1480,7 +1511,6 @@ namespace NpcFace
         {
             if(type == 0)
             {
-                //return CharacterAvatar.GetAvatarSizeFolder(avatar.Size);
                 return avatarSize switch
                 {
 					TaiwuAvatarSize.Normal => "NormalFace",
@@ -1500,12 +1530,20 @@ namespace NpcFace
             return "";
         }
 
+		private static Vector2 GetSizeWH(TaiwuAvatarSize avatarSize)
+		{
+			if(avatarSize == TaiwuAvatarSize.Big) return new Vector2(720, 880);
+			if(avatarSize == TaiwuAvatarSize.Normal) return new Vector2(360, 440);
+			if (avatarSize == TaiwuAvatarSize.Small) return new Vector2(180, 220);
+			return new Vector2(720, 880);
+		}
+
+
 		/// <summary>
-		/// 尝试加载图片，并 按路径 放入 图片缓存 resCache
+		/// 尝试加载图片
 		/// </summary>
 		private static Texture2D TryLoadImg(string resPath)
         {
-            if(resCache.TryGetValue(resPath, out Texture2D img)) { return img; }
             //MyLog($"tryLoad {resPath}");
             byte[] fileData = File.ReadAllBytes(resPath);
             Texture2D texture = new Texture2D(1, 1);
@@ -1513,7 +1551,6 @@ namespace NpcFace
 
             if (texture.LoadImage(fileData))
             {
-                resCache[resPath] = texture;
                 return texture;
             }
             return null;
