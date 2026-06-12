@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<config>
+	<!-- 工作目录：所有通讯文件都在此目录下 -->
+	<workDir>C:\4WorkSpace\ModSpace\TaiwuMod2025\InGameHelperFrontend\Mod配置</workDir>
+	<!-- 请求文件名 -->
+	<quest>quest.json</quest>
+	<!-- 响应文件名 -->
+	<result>result.json</result>
+	<!-- 结果索引文件名 -->
+	<resultIndex>result_index.json</resultIndex>
+	<!-- 轮询间隔（秒） -->
+	<pollInterval>0.5</pollInterval>
+</config>
