@@ -45,10 +45,7 @@ namespace InGameHelper
 		private DateTime _lastBackendResultTime = DateTime.MinValue;
 		private string _pendingDataRequestId; // 正在等待的数据请求ID
 
-		// 链式调用错误信息（供 GetSingletonData 返回给客户端）
-		private static string _lastInvokeError;
-
-		public override void Initialize()
+			public override void Initialize()
 		{
 			MyUtils.modName = nameof(InGameHelper);
 			MyUtils.MyLog("Initialize");
@@ -182,8 +179,7 @@ namespace InGameHelper
 						lock (_pendingLock) { _pendingSceneJson = json; }
 						break;
 
-					case "frontend_data":
-				case "front_code":
+					case "front_code":
 						// 前端可直接获取的数据 → 主线程协程处理
 						lock (_pendingLock) { _pendingSceneJson = json; }
 						break;
@@ -328,9 +324,6 @@ namespace InGameHelper
 				case "component_field":
 					resultData = SceneQueryService.QueryComponentField(request.Params);
 					break;
-				case "frontend_data":
-					resultData = QueryFrontendData(request.Params);
-					break;
 				case "front_code":
 					resultData = ExecuteFrontCode(request.RequestId, request.Params);
 					break;
@@ -413,20 +406,6 @@ namespace InGameHelper
 
 		// ===================== 前端数据查询 =====================
 
-		/// <summary>
-		/// 查询前端可直接访问的游戏数据（不走后端）。
-		/// 通用实现：data 参数为类名，通过 SingletonObject.getInstance&lt;T&gt;() 获取实例。
-		/// 支持任意注册为 Singleton 的类型，如 BasicGameData、CharacterMonitorModel 等。
-		/// </summary>
-		private static JToken QueryFrontendData(Dictionary<string, object> rawParams)
-		{
-			var dataType = rawParams.GetValueOrDefault<string>("data") ?? "";
-			if (string.IsNullOrEmpty(dataType))
-				return new JObject { ["error"] = "缺少 data 参数" };
-
-			return GetSingletonData(dataType, rawParams);
-		}
-
 		/// <summary>执行 front_code 请求：entry → chain → attach → JToken（前后端各一份，协议对齐）</summary>
 		private static JToken ExecuteFrontCode(string requestId, Dictionary<string, object> rawParams)
 		{
@@ -497,313 +476,6 @@ namespace InGameHelper
 			}
 
 			return JTokenConverter.ConvertToJToken(current, resultDepth);
-		}
-
-		/// <summary>通用方法：通过类名获取 SingletonObject 实例并读取其数据</summary>
-		private static JToken GetSingletonData(string typeName, Dictionary<string, object> rawParams)
-		{
-			Type targetType = null;
-
-			// 所有程序集中搜索指定类名
-			foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
-			{
-				targetType = asm.GetType(typeName, false);
-				if (targetType != null) break;
-			}
-
-			if (targetType == null)
-				return new JObject { ["error"] = $"找不到类型: {typeName}，请使用完整类名" };
-
-			try
-			{
-				var getInstanceMethod = typeof(SingletonObject).GetMethod("getInstance",
-					BindingFlags.Public | BindingFlags.Static);
-				if (getInstanceMethod == null)
-					return new JObject { ["error"] = "未找到 SingletonObject.getInstance" };
-
-				var genericMethod = getInstanceMethod.MakeGenericMethod(targetType);
-				var instance = genericMethod.Invoke(null, null);
-				if (instance == null)
-					return new JObject { ["error"] = $"{typeName} 实例为空（可能未初始化）" };
-
-				// ====== 链式调用对象方法（多级） ======
-				_lastInvokeError = null;
-				instance = ApplyFrontendMethodChain(instance, rawParams);
-
-				if (instance == null)
-				{
-					var errMsg = _lastInvokeError ?? "未知错误";
-					return new JObject { ["error"] = $"对象方法链调用失败: {errMsg}" };
-				}
-
-				var t = HarmonyLib.Traverse.Create(instance);
-
-				// 如果指定了 field，只返回该字段
-				var fieldName = rawParams.GetValueOrDefault<string>("field");
-				if (!string.IsNullOrEmpty(fieldName))
-				{
-					var val = t.Field(fieldName).GetValue();
-					if (val == null)
-						val = t.Property(fieldName).GetValue();
-					if (val == null)
-						return new JObject { ["error"] = $"在 {typeName} 上未找到字段: {fieldName}" };
-
-					return new JObject
-					{
-						["_type"] = typeName,
-						["field"] = fieldName,
-						["value"] = JTokenConverter.ConvertToJToken(val, 3)
-					};
-				}
-
-				// 未指定 field → 返回所有公开字段
-				var data = new JObject { ["_type"] = typeName };
-				var fields = targetType.GetFields(BindingFlags.Public | BindingFlags.Instance);
-				foreach (var f in fields)
-				{
-					try
-					{
-						var val = t.Field(f.Name).GetValue();
-						if (val != null)
-							data[f.Name] = JTokenConverter.ConvertToJToken(val, 2);
-					}
-					catch { }
-				}
-
-				return data;
-			}
-			catch (Exception ex)
-			{
-				return new JObject { ["error"] = $"获取 {typeName} 失败: {ex.Message}" };
-			}
-		}
-
-		/// <summary>前端版链式方法调用（与后端 ApplyObjectMethodChain 类似，支持泛型方法、枚举转换）</summary>
-		private static object ApplyFrontendMethodChain(object obj, Dictionary<string, object> rawParams)
-		{
-			if (obj == null) return obj;
-
-			// 解析 objectMethods
-			if (!(rawParams.TryGetValue("objectMethods", out var methodsObj) && methodsObj is JArray methodsArr))
-				return obj;
-			if (methodsArr.Count == 0) return obj;
-
-			var methods = methodsArr.Select(m => m.ToString()).ToList();
-
-			// 解析 objectArgsList（数组的数组，可选，与 methods 对应）
-			var argsList = new List<object[]>();
-			if (rawParams.TryGetValue("objectArgsList", out var argsListObj) && argsListObj is JArray argsArr)
-			{
-				foreach (var item in argsArr)
-				{
-					if (item is JArray ja) argsList.Add(NormalizeJArray(ja));
-					else argsList.Add(null);
-				}
-			}
-
-			var current = obj;
-			for (int i = 0; i < methods.Count; i++)
-			{
-				var args = (i < argsList.Count) ? argsList[i] : null;
-				current = InvokeFrontendMethodDirect(current, methods[i], args);
-				if (current == null) return null;
-			}
-			return current;
-		}
-
-		/// <summary>对对象调用方法（支持泛型、枚举转换、类型转换）</summary>
-		private static object InvokeFrontendMethodDirect(object obj, string methodName, object[] args)
-		{
-			if (obj == null) return null;
-			MyUtils.MyLog($"[FEMethod] {methodName}({FormatArgs(args)}) on {obj.GetType().Name}");
-
-			// 1️⃣ 先 Traverse 尝试（最简单的情况）
-			var t = HarmonyLib.Traverse.Create(obj);
-			if (args != null && args.Length > 0)
-			{
-				try
-				{
-					var val = t.Method(methodName, args).GetValue();
-					if (val != null) return val;
-				}
-				catch (Exception ex)
-				{
-					_lastInvokeError = $"Traverse({methodName}) 调用异常: {ex.Message}";
-				}
-			}
-			else
-			{
-				try
-				{
-					var val = t.Method(methodName).GetValue();
-					if (val != null) return val;
-				}
-				catch (Exception ex)
-				{
-					_lastInvokeError = $"Traverse({methodName}) 调用异常: {ex.Message}";
-				}
-			}
-
-			// 2️⃣ 反射调用（支持泛型方法 + 枚举转换 + 类型转换）
-			try
-			{
-				var result = InvokeFrontendMethodReflection(obj, methodName, args);
-				if (result != null) return result;
-			}
-			catch (Exception ex)
-			{
-				var inner = ex.InnerException != null ? ex.InnerException.Message : ex.Message;
-				_lastInvokeError = $"反射({methodName}) 调用异常: {inner}";
-				MyUtils.MyLog($"[FEMethod] 反射调用失败: {ex.Message} | Inner: {inner}");
-			}
-
-			if (_lastInvokeError == null)
-				_lastInvokeError = $"{methodName} 全部尝试失败，objType={obj.GetType().Name}";
-			MyUtils.MyLog($"[FEMethod] {methodName} 全部尝试失败");
-			return null;
-		}
-
-		/// <summary>反射调用方法：支持泛型方法名 GetComponent&lt;T&gt;、int→enum 转换、数字类型兼容</summary>
-		private static object InvokeFrontendMethodReflection(object obj, string methodName, object[] args)
-		{
-			// 解析泛型方法名: "GetComponent<RectTransform>" → name="GetComponent", typeArg="RectTransform"
-			string genericTypeName = null;
-			var genericMatch = System.Text.RegularExpressions.Regex.Match(methodName, @"^(\w+)<(.+)>$");
-			if (genericMatch.Success)
-			{
-				methodName = genericMatch.Groups[1].Value;
-				genericTypeName = genericMatch.Groups[2].Value;
-			}
-
-			var type = obj.GetType();
-			var argCount = args?.Length ?? 0;
-
-			// 查找名称 + 参数数量匹配的方法
-			var methods = type.GetMethods(BindingFlags.Public | BindingFlags.Instance)
-				.Where(m => m.Name == methodName && m.GetParameters().Length == argCount)
-				.ToList();
-
-			if (methods.Count == 0)
-			{
-				_lastInvokeError = $"找不到匹配方法 {methodName}({argCount} params) 在 {type.Name}";
-				MyUtils.MyLog($"[FERefl] 未找到 {methodName}({argCount} params) 在 {type.Name}");
-				return null;
-			}
-
-			foreach (var method in methods)
-			{
-				try
-				{
-					var parameters = method.GetParameters();
-					MethodInfo methodToInvoke = method;
-
-					// 泛型方法处理
-					if (genericTypeName != null)
-					{
-						if (!method.IsGenericMethod) continue;
-						var genericType = FindTypeInAssemblies(genericTypeName);
-						if (genericType == null)
-						{
-							MyUtils.MyLog($"[FERefl] 找不到泛型类型: {genericTypeName}");
-							continue;
-						}
-						methodToInvoke = method.MakeGenericMethod(genericType);
-					}
-					else if (method.IsGenericMethodDefinition)
-					{
-						continue; // 需要泛型参数但未提供
-					}
-
-					// 参数转换（枚举 + 数字类型兼容）
-					var convertedArgs = new object[argCount];
-					for (int i = 0; i < argCount; i++)
-					{
-						var paramType = parameters[i].ParameterType;
-						var arg = args[i];
-						convertedArgs[i] = ConvertArgToParamType(arg, paramType);
-					}
-
-					var result = methodToInvoke.Invoke(obj, convertedArgs);
-					MyUtils.MyLog($"[FERefl] {methodName} 成功 → {result?.GetType()?.Name ?? "null"}");
-					return result;
-				}
-				catch (Exception ex)
-				{
-					var inner = ex.InnerException != null ? ex.InnerException.Message : ex.Message;
-					_lastInvokeError = $"{method.Name} 调用异常: {inner}";
-					MyUtils.MyLog($"[FERefl] 方法 {method.Name} 失败: {ex.Message} | Inner: {inner}");
-					continue;
-				}
-			}
-			return null;
-		}
-
-		/// <summary>将参数值转换为目标参数类型（支持 int↔enum、数字类型提升）</summary>
-		private static object ConvertArgToParamType(object arg, Type targetType)
-		{
-			if (arg == null) return null;
-
-			// 类型直接匹配
-			if (targetType.IsAssignableFrom(arg.GetType())) return arg;
-
-			// int→enum
-			if (targetType.IsEnum)
-			{
-				if (arg is int i) return Enum.ToObject(targetType, i);
-				if (arg is long l) return Enum.ToObject(targetType, (int)l);
-				if (arg is string s && Enum.IsDefined(targetType, s)) return Enum.Parse(targetType, s);
-			}
-
-			// 数字类型提升 / 降级
-			if (targetType == typeof(long) && arg is int iv) return (long)iv;
-			if (targetType == typeof(int) && arg is long lv) return (int)lv;
-			if (targetType == typeof(float) && arg is double d) return (float)d;
-			if (targetType == typeof(double) && arg is float f) return (double)f;
-			if (targetType == typeof(long) && arg is float fv) return (long)fv;
-			if (targetType == typeof(int) && arg is float fv2) return (int)fv2;
-			if (targetType == typeof(float) && arg is long lv2) return (float)lv2;
-			if (targetType == typeof(float) && arg is int iv2) return (float)iv2;
-
-			return arg; // 原样返回
-		}
-
-		/// <summary>在所有已加载程序集中查找类型</summary>
-		private static Type FindTypeInAssemblies(string typeName)
-		{
-			foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
-			{
-				var t = asm.GetType(typeName, false);
-				if (t != null) return t;
-			}
-			return null;
-		}
-
-		/// <summary>标准化 JArray（long→int 转换）</summary>
-		private static object[] NormalizeJArray(JArray ja)
-		{
-			var result = new List<object>();
-			foreach (var j in ja)
-			{
-				if (j is JValue jv)
-				{
-					var val = jv.Value;
-					// JSON 数字默认 long → int
-					if (val is long l) result.Add((int)l);
-					else result.Add(val);
-				}
-				else
-				{
-					result.Add(j); // 复杂类型（JArray/JObject）原样保留
-				}
-			}
-			return result.ToArray();
-		}
-
-		/// <summary>格式化参数列表用于日志</summary>
-		private static string FormatArgs(object[] args)
-		{
-			if (args == null || args.Length == 0) return "";
-			return string.Join(", ", args.Select(a => a?.ToString() ?? "null"));
 		}
 
 		// ===================== 文件工具 =====================
