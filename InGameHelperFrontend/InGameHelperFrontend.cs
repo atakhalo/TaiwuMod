@@ -212,7 +212,7 @@ namespace InGameHelper
 				if (string.IsNullOrEmpty(json)) return;
 
 				// 检查后端结果大小，大结果拆分到独立文件
-				if (json.Length > 300)
+				if (json.Length > 1000)
 				{
 					// 解析获取 requestId
 					string requestId = _pendingDataRequestId ?? "unknown";
@@ -341,7 +341,7 @@ namespace InGameHelper
 			var hasLongResult = false;
 			string longResultFile = null;
 			var resultStr = resultData.ToString(Formatting.None);
-			if (resultStr.Length > 300)
+			if (resultStr.Length > 1000)
 			{
 				hasLongResult = true;
 				longResultFile = $"result_{request.RequestId}.json";
