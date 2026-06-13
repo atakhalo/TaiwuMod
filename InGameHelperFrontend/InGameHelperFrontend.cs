@@ -313,20 +313,42 @@ namespace InGameHelper
 			var sw = Stopwatch.StartNew();
 
 			JToken resultData = null;
+			object rawObject = null; // 供 attach 链使用的原始对象
+
 			switch (request.Type)
 			{
 				case "scene_hierarchy":
 					resultData = SceneQueryService.QueryHierarchy(request.Params);
 					break;
 				case "component_info":
+					rawObject = SceneQueryService.FindComponent(request.Params);
 					resultData = SceneQueryService.QueryComponentInfo(request.Params);
 					break;
 				case "component_field":
-					resultData = SceneQueryService.QueryComponentField(request.Params);
+					resultData = SceneQueryService.QueryComponentField(request.Params, out rawObject);
 					break;
 				case "front_code":
 					resultData = ExecuteFrontCode(request.RequestId, request.Params);
 					break;
+			}
+
+			// 统一处理 attach
+			if (resultData != null && rawObject != null && request.Params != null
+				&& request.Params.TryGetValue("attach", out var attachVal) && attachVal is JArray attachArr && attachArr.Count > 0)
+			{
+				var lastAttach = attachArr[attachArr.Count - 1];
+				var attachParams = lastAttach["params"] as JObject;
+				if (attachParams != null)
+				{
+					var attachChain = attachParams["chain"]?.ToObject<List<FrontendChainStep>>();
+					int attachDepth = attachParams["resultDepth"]?.Value<int>() ?? 3;
+					if (attachChain != null && attachChain.Count > 0)
+					{
+						var attachResult = FrontendChainExecutor.ExecuteToObject(rawObject, attachChain);
+						if (attachResult != null)
+							resultData = JTokenConverter.ConvertToJToken(attachResult, attachDepth);
+					}
+				}
 			}
 
 			if (resultData == null)
@@ -531,6 +553,35 @@ namespace InGameHelper
 
 	public static class SceneQueryService
 	{
+		/// <summary>从请求参数中提取路径并查找 GameObject（供 attach 链使用）</summary>
+		public static object FindGameObject(Dictionary<string, object> rawParams)
+		{
+			if (rawParams == null) return null;
+			var path = rawParams.GetValueOrDefault<string>("gameObjectPath") ?? "";
+			if (string.IsNullOrEmpty(path)) return null;
+			return FindGameObjectByPath(path);
+		}
+
+		/// <summary>从请求参数中提取路径和组件类型，查找匹配的 Component（供 attach 链使用）</summary>
+		public static object FindComponent(Dictionary<string, object> rawParams)
+		{
+			if (rawParams == null) return null;
+			var path = rawParams.GetValueOrDefault<string>("gameObjectPath") ?? "";
+			var compTypeName = rawParams.GetValueOrDefault<string>("componentType") ?? "";
+			if (string.IsNullOrEmpty(path) || string.IsNullOrEmpty(compTypeName)) return null;
+			var go = FindGameObjectByPath(path);
+			if (go == null) return null;
+			foreach (var comp in go.GetComponents<Component>())
+			{
+				if (comp == null) continue;
+				var name = comp.GetType().Name;
+				if (string.Equals(name, compTypeName, StringComparison.OrdinalIgnoreCase) ||
+					comp.GetType().FullName.Contains(compTypeName))
+					return comp;
+			}
+			return null;
+		}
+
 		public static JToken QueryHierarchy(Dictionary<string, object> rawParams)
 		{
 			var rootType = rawParams.GetValueOrDefault<string>("rootType") ?? "all_canvases";
@@ -635,8 +686,9 @@ namespace InGameHelper
 			return result;
 		}
 
-		public static JToken QueryComponentField(Dictionary<string, object> rawParams)
+		public static JToken QueryComponentField(Dictionary<string, object> rawParams, out object rawFieldValue)
 		{
+			rawFieldValue = null;
 			var path = rawParams.GetValueOrDefault<string>("gameObjectPath") ?? "";
 			var compTypeName = rawParams.GetValueOrDefault<string>("componentType") ?? "";
 			var fieldName = rawParams.GetValueOrDefault<string>("field") ?? "";
@@ -660,6 +712,7 @@ namespace InGameHelper
 				if (prop != null)
 				{
 					var val = prop.GetValue();
+					rawFieldValue = val;
 					if (val != null)
 						return new JObject { ["type"] = comp.GetType().FullName, ["componentType"] = name, ["field"] = fieldName, ["value"] = JTokenConverter.ConvertToJToken(val, 1) };
 				}
@@ -667,6 +720,7 @@ namespace InGameHelper
 				if (f != null)
 				{
 					var val = f.GetValue();
+					rawFieldValue = val;
 					return new JObject { ["type"] = comp.GetType().FullName, ["componentType"] = name, ["field"] = fieldName, ["value"] = val != null ? JTokenConverter.ConvertToJToken(val, 1) : JValue.CreateNull() };
 				}
 				return new JObject { ["error"] = $"在 {name} 上未找到: {fieldName}" };

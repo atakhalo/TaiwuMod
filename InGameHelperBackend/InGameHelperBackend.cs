@@ -215,6 +215,7 @@ namespace InGameHelper
 			try
 			{
 				JToken resultData = null;
+				object rawRoot = null; // 供 attach 链使用的原始对象
 
 				switch (request.Type)
 				{
@@ -222,15 +223,21 @@ namespace InGameHelper
 						resultData = ExecuteBackCode(request.RequestId, request.Params);
 						break;
 					case "taiwu_info":
+						rawRoot = DomainManager.Taiwu;
 						resultData = BackendDataService.QueryTaiwuInfo();
 						break;
 					case "character_info":
-						resultData = BackendDataService.QueryCharacterInfo(request.Params);
+						rawRoot = BackendDataService.QueryCharacterRaw(request.Params);
+						if (rawRoot is JObject err) { resultData = err; break; }
+						resultData = BackendJTokenConverter.ConvertToJToken(rawRoot, 3);
 						break;
 					case "character_name":
-						resultData = BackendDataService.QueryCharacterName(request.Params);
+						rawRoot = BackendDataService.QueryCharacterNameRaw(request.Params);
+						if (rawRoot is JObject err2) { resultData = err2; break; }
+						resultData = BackendDataService.FormatCharacterName(request.Params, rawRoot);
 						break;
 					case "world_info":
+						rawRoot = DomainManager.World;
 						resultData = BackendDataService.QueryWorldInfo();
 						break;
 					default:
@@ -240,6 +247,27 @@ namespace InGameHelper
 							Success = false,
 							Error = $"不支持的类型: {request.Type}"
 						});
+				}
+
+				// 统一处理 attach：在原始对象上执行附加链后重新序列化
+				if (resultData != null && rawRoot != null && request.Params != null
+					&& request.Params.TryGetValue("attach", out var attachVal) && attachVal is JArray attachArr && attachArr.Count > 0)
+				{
+					// 取最后一个 attach 项的 chain + resultDepth
+					var lastAttach = attachArr[attachArr.Count - 1];
+					var attachParams = lastAttach["params"] as JObject;
+					if (attachParams != null)
+					{
+						var attachChain = attachParams["chain"]?.ToObject<List<BackendChainStep>>();
+						int attachDepth = attachParams["resultDepth"]?.Value<int>() ?? 3;
+
+						if (attachChain != null && attachChain.Count > 0)
+						{
+							var attachResult = BackendChainExecutor.ExecuteToObject(rawRoot, attachChain);
+							if (attachResult != null)
+								resultData = BackendJTokenConverter.ConvertToJToken(attachResult, attachDepth);
+						}
+					}
 				}
 
 				return JsonConvert.SerializeObject(new BackendGameResponse
@@ -576,12 +604,77 @@ namespace InGameHelper
 
 		private static JToken GetCharacterDetail(int charId)
 		{
-			var cd = DomainManager.Character;
-			var charObj = HarmonyLib.Traverse.Create(cd).Method("GetElement_Objects", new object[] { charId }).GetValue();
+			var charObj = GetCharacterRaw(charId);
 			if (charObj == null)
 				return new JObject { ["error"] = $"未找到角色: charId={charId}" };
 
 			return BackendJTokenConverter.ConvertToJToken(charObj, 3);
+		}
+
+		/// <summary>获取原始 Character 对象（供 attach 链使用）</summary>
+		public static object GetCharacterRaw(int charId)
+		{
+			var cd = DomainManager.Character;
+			return HarmonyLib.Traverse.Create(cd).Method("GetElement_Objects", new object[] { charId }).GetValue();
+		}
+
+		/// <summary>获取 raw Character raw 对象（不序列化），失败返回 JObject 错误</summary>
+		public static object QueryCharacterRaw(Dictionary<string, object> rawParams)
+		{
+			if (rawParams == null || !rawParams.ContainsKey("charId"))
+				return new JObject { ["error"] = "缺少 charId 参数" };
+			int charId = ParseInt(rawParams["charId"]);
+			if (charId < 0)
+				return new JObject { ["error"] = $"charId 格式无效: {rawParams["charId"]}" };
+			var obj = GetCharacterRaw(charId);
+			if (obj == null)
+				return new JObject { ["error"] = $"未找到角色: charId={charId}" };
+			return obj;
+		}
+
+		/// <summary>获取原始 NameRelatedData 对象（供 attach 链使用），失败返回 JObject 错误</summary>
+		public static object QueryCharacterNameRaw(Dictionary<string, object> rawParams)
+		{
+			if (rawParams == null || !rawParams.ContainsKey("charId"))
+				return new JObject { ["error"] = "缺少 charId 参数" };
+			int charId = ParseInt(rawParams["charId"]);
+			if (charId < 0)
+				return new JObject { ["error"] = $"charId 格式无效: {rawParams["charId"]}" };
+			try
+			{
+				return HarmonyLib.Traverse.Create(DomainManager.Character)
+					.Method("GetNameRelatedData", new object[] { charId }).GetValue();
+			}
+			catch (Exception ex)
+			{
+				return new JObject { ["error"] = $"获取角色姓名数据失败: {ex.Message}" };
+			}
+		}
+
+		/// <summary>将 NameRelatedData 格式化为 JObject（与 QueryCharacterName 格式一致）</summary>
+		public static JToken FormatCharacterName(Dictionary<string, object> rawParams, object nameData)
+		{
+			if (nameData == null)
+				return new JObject { ["error"] = "未找到角色名称数据" };
+			int charId = ParseInt(rawParams["charId"]);
+
+			var nt = HarmonyLib.Traverse.Create(nameData);
+			var fullNameObj = nt.Field("FullName").GetValue();
+			string surname = "", givenName = "";
+			if (fullNameObj != null)
+			{
+				var ft = HarmonyLib.Traverse.Create(fullNameObj);
+				surname = ft.Field("Surname").GetValue()?.ToString() ?? "";
+				givenName = ft.Field("GivenName").GetValue()?.ToString() ?? "";
+			}
+
+			return new JObject
+			{
+				["charId"] = charId,
+				["surname"] = surname,
+				["givenName"] = givenName,
+				["fullName"] = surname + givenName
+			};
 		}
 
 		private static int ParseInt(object val)
