@@ -227,6 +227,9 @@ namespace InGameHelper
 
 				switch (request.Type)
 				{
+					case "back_code":
+						resultData = ExecuteBackCode(request.RequestId, request.Params);
+						break;
 					case "game_data":
 						resultData = BackendDataService.Query(request.Params);
 						break;
@@ -269,6 +272,85 @@ namespace InGameHelper
 				});
 			}
 		}
+
+		/// <summary>执行 back_code 请求：entry → chain → attach → JToken</summary>
+		private static JToken ExecuteBackCode(string requestId, Dictionary<string, object> rawParams)
+		{
+			if (rawParams == null)
+				return new JObject { ["error"] = "params 不能为空" };
+
+			// 解析 entry
+			EntryInfo entry = null;
+			if (rawParams.TryGetValue("entry", out var entryObj) && entryObj is JObject entryJObj)
+				entry = entryJObj.ToObject<EntryInfo>();
+
+			// 解析 chain
+			List<BackendChainStep> chain = null;
+			if (rawParams.TryGetValue("chain", out var chainObj) && chainObj is JArray chainJArr)
+				chain = chainJArr.ToObject<List<BackendChainStep>>();
+
+			// 解析 resultDepth（默认 3）
+			int resultDepth = 3;
+			if (rawParams.TryGetValue("resultDepth", out var depthVal))
+			{
+				if (depthVal is long dl) resultDepth = (int)dl;
+				else if (depthVal is int di) resultDepth = di;
+			}
+
+			// 解析 attach
+			JArray attachArr = null;
+			if (rawParams.TryGetValue("attach", out var attachVal) && attachVal is JArray attachJArr)
+				attachArr = attachJArr;
+
+			// 解析起点
+			object current;
+			if (entry != null)
+			{
+				current = BackendChainExecutor.ResolveEntry(entry);
+				if (current == null)
+					return new JObject { ["error"] = $"找不到类型: {entry.Name}" };
+			}
+			else
+			{
+				return new JObject { ["error"] = "独立请求必须指定 entry" };
+			}
+
+			// 执行主链
+			if (chain != null && chain.Count > 0)
+			{
+				current = BackendChainExecutor.ExecuteToObject(current, chain);
+				if (current == null)
+				{
+					var detail = BackendChainExecutor.LastError ?? "(无详细信息)";
+					return new JObject { ["error"] = $"链式调用执行失败: {detail}" };
+				}
+			}
+
+			// 执行 attach 链（在原始对象上继续反射）
+			if (attachArr != null)
+			{
+				foreach (var item in attachArr)
+				{
+					var attachParams = item["params"] as JObject;
+					if (attachParams == null) continue;
+
+					var attachChain = attachParams["chain"]?.ToObject<List<BackendChainStep>>();
+					if (attachChain == null || attachChain.Count == 0) continue;
+
+					var attachDepth = attachParams["resultDepth"]?.Value<int>() ?? resultDepth;
+					resultDepth = attachDepth;
+
+					current = BackendChainExecutor.ExecuteToObject(current, attachChain);
+					if (current == null)
+					{
+						var detail = BackendChainExecutor.LastError ?? "(无详细信息)";
+						return new JObject { ["error"] = $"附加链调用失败: {detail}" };
+					}
+				}
+			}
+
+			return BackendJTokenConverter.ConvertToJToken(current, resultDepth);
+		}
 	}
 
 	// ===================================================================
@@ -290,6 +372,24 @@ namespace InGameHelper
 		[JsonProperty("error")] public string Error { get; set; }
 		[JsonProperty("hasLongResult")] public bool HasLongResult { get; set; }
 		[JsonProperty("longResultFile")] public string LongResultFile { get; set; }
+	}
+
+	// ===================================================================
+	//  Chain 模型 — 反射链数据结构（前后端共用协议）
+	// ===================================================================
+
+	public class BackendChainStep
+	{
+		[JsonProperty("step")] public string Step { get; set; }      // "method" | "field" | "property"
+		[JsonProperty("name")] public string Name { get; set; }      // 成员名
+		[JsonProperty("stepType")] public string StepType { get; set; } // 结果类型全名
+		[JsonProperty("argTypes")] public string[] ArgTypes { get; set; } // 方法参数类型（仅 method）
+		[JsonProperty("args")] public object[] Args { get; set; }    // 方法参数值（仅 method）
+	}
+
+	public class EntryInfo
+	{
+		[JsonProperty("name")] public string Name { get; set; }      // 入口完整类名
 	}
 
 	// ===================================================================
@@ -1006,6 +1106,267 @@ namespace InGameHelper
 					}
 				}
 				catch { /* 跳过序列化失败的字段 */ }
+			}
+			return result;
+		}
+	}
+
+	// ===================================================================
+	//  BackendChainExecutor — 反射链执行器（前后端各一份，协议对齐）
+	// ===================================================================
+
+	public static class BackendChainExecutor
+	{
+		private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
+		private static string _lastInvokeError;
+
+		/// <summary>最近一次链式调用的失败原因</summary>
+		public static string LastError => _lastInvokeError;
+
+		/// <summary>从 entry 解析出起点对象：按类名查找 → 尝试 Instance/GetInstance → 返回 Type 本身（静态方法用）</summary>
+		public static object ResolveEntry(EntryInfo entry)
+		{
+			if (entry == null || string.IsNullOrEmpty(entry.Name))
+				return null;
+
+			var type = AccessTools.TypeByName(entry.Name);
+			if (type == null)
+				throw new ArgumentException($"找不到类型: {entry.Name}");
+
+			// 尝试常见静态实例获取模式
+			try
+			{
+				var instProp = type.GetProperty("Instance", BindingFlags.Public | BindingFlags.Static);
+				if (instProp != null) return instProp.GetValue(null);
+			}
+			catch { }
+			try
+			{
+				var instField = type.GetField("Instance", BindingFlags.Public | BindingFlags.Static);
+				if (instField != null) return instField.GetValue(null);
+			}
+			catch { }
+			try
+			{
+				var getInst = type.GetMethod("GetInstance", BindingFlags.Public | BindingFlags.Static, null, Type.EmptyTypes, null);
+				if (getInst != null) return getInst.Invoke(null, null);
+			}
+			catch { }
+
+			// 没有实例 → 返回类型本身（供静态方法/字段调用）
+			return type;
+		}
+
+		/// <summary>执行链返回 JToken 序列化结果</summary>
+		public static JToken Execute(object obj, List<BackendChainStep> chain, int depth)
+		{
+			var resultObj = ExecuteToObject(obj, chain);
+			if (resultObj == null) return JValue.CreateNull();
+			return BackendJTokenConverter.ConvertToJToken(resultObj, depth);
+		}
+
+		/// <summary>执行链返回原始对象（供后续 attach 链接）</summary>
+		public static object ExecuteToObject(object obj, List<BackendChainStep> chain)
+		{
+			if (chain == null || chain.Count == 0) return obj;
+			object current = obj;
+			for (int i = 0; i < chain.Count; i++)
+			{
+				_lastInvokeError = null;
+				current = ExecuteStep(current, chain[i]);
+				if (current == null)
+				{
+					Logger.Warn($"[BackendChain] 第 {i} 步失败: {chain[i].Step} {chain[i].Name} — {_lastInvokeError ?? "返回 null"}");
+					return null;
+				}
+			}
+			return current;
+		}
+
+		private static object ExecuteStep(object obj, BackendChainStep step)
+		{
+			if (obj == null) return null;
+			var objType = obj is Type st ? st : obj.GetType();
+			// obj 为 Type 时用 Traverse.Create(Type) 重载以访问静态成员
+			var traverseTarget = obj is Type staticType
+				? HarmonyLib.Traverse.Create(staticType)
+				: HarmonyLib.Traverse.Create(obj);
+
+			object val;
+			switch (step.Step)
+			{
+				case "method":
+					return InvokeMethod(obj, step.Name, step.ArgTypes, step.Args);
+				case "field":
+					val = traverseTarget.Field(step.Name).GetValue();
+					if (val == null) _lastInvokeError = $"在 {objType.Name} 上找不到字段: {step.Name}";
+					return val;
+				case "property":
+					val = traverseTarget.Property(step.Name).GetValue();
+					if (val == null) _lastInvokeError = $"在 {objType.Name} 上找不到属性: {step.Name}";
+					return val;
+				default:
+					_lastInvokeError = $"未知 step 类型: {step.Step}";
+					return null;
+			}
+		}
+
+		private static object InvokeMethod(object obj, string methodName, string[] argTypes, object[] args)
+		{
+			if (string.IsNullOrEmpty(methodName)) return null;
+			int argCount = args?.Length ?? 0;
+
+			// 解析泛型方法名: GetComponent<RectTransform> → 方法名 GetComponent, 类型 RectTransform
+			string genericTypeName = null;
+			var genericMatch = System.Text.RegularExpressions.Regex.Match(methodName, @"^(\w+)<(.+)>$");
+			if (genericMatch.Success)
+			{
+				methodName = genericMatch.Groups[1].Value;
+				genericTypeName = genericMatch.Groups[2].Value;
+			}
+
+			if (obj is Type staticType)
+				return InvokeStaticMethod(staticType, methodName, genericTypeName, argTypes, args);
+			else
+				return InvokeInstanceMethod(obj, methodName, genericTypeName, argTypes, args);
+		}
+
+		private static object InvokeStaticMethod(Type type, string methodName, string genericTypeName, string[] argTypes, object[] args)
+		{
+			// 如果指定了 argTypes，用精确类型查找
+			if (argTypes != null && argTypes.Length > 0)
+			{
+				var paramTypes = argTypes.Select(AccessTools.TypeByName).ToArray();
+				var mi = AccessTools.Method(type, methodName, paramTypes);
+				if (mi != null)
+				{
+					try
+					{
+						var method = ApplyGenericIfNeeded(mi, genericTypeName);
+						return method.Invoke(null, args);
+					}
+					catch (Exception ex)
+					{
+						var inner = ex.InnerException?.Message ?? ex.Message;
+						throw new InvalidOperationException($"静态方法 {methodName} 调用失败: {inner}");
+					}
+				}
+			}
+
+			// 无 argTypes → 枚举尝试
+			var methods = type.GetMethods(BindingFlags.Public | BindingFlags.Static)
+				.Where(m => m.Name == methodName && m.GetParameters().Length == (args?.Length ?? 0))
+				.ToList();
+
+			foreach (var m in methods)
+			{
+				try
+				{
+					var method = ApplyGenericIfNeeded(m, genericTypeName);
+					var pa = method.GetParameters();
+					var conv = ConvertArgsToParamTypes(args, pa.Select(p => p.ParameterType).ToArray());
+					return method.Invoke(null, conv);
+				}
+				catch { continue; }
+			}
+
+			_lastInvokeError = $"找不到静态方法 {methodName}({args?.Length ?? 0} 参数) 在 {type.Name}";
+			return null;
+		}
+
+		private static object InvokeInstanceMethod(object obj, string methodName, string genericTypeName, string[] argTypes, object[] args)
+		{
+			var t = HarmonyLib.Traverse.Create(obj);
+			int argCount = args?.Length ?? 0;
+
+			// 先用 Traverse 尝试（最简路径）
+			if (argCount > 0)
+			{
+				try
+				{
+					var val = t.Method(methodName, args).GetValue();
+					if (val != null) return val;
+				}
+				catch { }
+			}
+			else
+			{
+				try
+				{
+					var val = t.Method(methodName).GetValue();
+					if (val != null) return val;
+				}
+				catch { }
+			}
+
+			// 如果指定了 argTypes，用精确类型查找
+			if (argTypes != null && argTypes.Length > 0)
+			{
+				var paramTypes = argTypes.Select(AccessTools.TypeByName).ToArray();
+				var mi = AccessTools.Method(obj.GetType(), methodName, paramTypes);
+				if (mi != null)
+				{
+					try
+					{
+						var method = ApplyGenericIfNeeded(mi, genericTypeName);
+						var conv = ConvertArgsToParamTypes(args, paramTypes);
+						return method.Invoke(obj, conv);
+					}
+					catch (Exception ex)
+					{
+						var inner = ex.InnerException?.Message ?? ex.Message;
+						_lastInvokeError = $"实例方法 {methodName} (精确类型) 调用失败: {inner}";
+					}
+				}
+			}
+
+			// 遍历所有同名方法，参数数量匹配的，尝试枚举/数字转换后调用
+			var methods = obj.GetType().GetMethods(BindingFlags.Public | BindingFlags.Instance)
+				.Where(m => m.Name == methodName && m.GetParameters().Length == argCount)
+				.ToList();
+
+			foreach (var method in methods)
+			{
+				try
+				{
+					var toInvoke = ApplyGenericIfNeeded(method, genericTypeName);
+					var pa = toInvoke.GetParameters();
+					var conv = ConvertArgsToParamTypes(args, pa.Select(p => p.ParameterType).ToArray());
+					var result = toInvoke.Invoke(obj, conv);
+					if (result != null) return result;
+				}
+				catch { continue; }
+			}
+
+			_lastInvokeError = $"方法 {methodName} 全部尝试失败，objType={obj.GetType().Name}";
+			return null;
+		}
+
+		private static MethodInfo ApplyGenericIfNeeded(MethodInfo method, string genericTypeName)
+		{
+			if (genericTypeName == null || !method.IsGenericMethodDefinition) return method;
+			var genericType = AccessTools.TypeByName(genericTypeName);
+			if (genericType == null) throw new ArgumentException($"找不到泛型类型: {genericTypeName}");
+			return method.MakeGenericMethod(genericType);
+		}
+
+		private static object[] ConvertArgsToParamTypes(object[] args, Type[] targetTypes)
+		{
+			if (args == null || args.Length == 0) return args;
+			var result = new object[args.Length];
+			for (int i = 0; i < args.Length; i++)
+			{
+				if (args[i] == null) { result[i] = null; continue; }
+				var t = targetTypes[i];
+				if (t.IsAssignableFrom(args[i].GetType())) { result[i] = args[i]; continue; }
+				if (t.IsEnum && args[i] is int iv) { result[i] = Enum.ToObject(t, iv); continue; }
+				if (t.IsEnum && args[i] is long lv) { result[i] = Enum.ToObject(t, (int)lv); continue; }
+				if (args[i] is IConvertible && t.IsValueType && !t.IsEnum)
+				{
+					try { result[i] = Convert.ChangeType(args[i], t); continue; }
+					catch { }
+				}
+				result[i] = args[i];
 			}
 			return result;
 		}
