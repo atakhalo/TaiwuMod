@@ -878,7 +878,9 @@ namespace InGameHelper
 					try
 					{
 						var method = ApplyGenericIfNeeded(mi, genericTypeName);
-						return method.Invoke(null, args);
+						var result = method.Invoke(null, args);
+						if (result == null && method.ReturnType == typeof(void)) return type;
+						return result;
 					}
 					catch (Exception ex)
 					{
@@ -900,7 +902,9 @@ namespace InGameHelper
 					var method = ApplyGenericIfNeeded(m, genericTypeName);
 					var pa = method.GetParameters();
 					var conv = ConvertArgsToParamTypes(args, pa.Select(p => p.ParameterType).ToArray());
-					return method.Invoke(null, conv);
+					var result = method.Invoke(null, conv);
+					if (result == null && method.ReturnType == typeof(void)) return type;
+					return result;
 				}
 				catch { continue; }
 			}
@@ -945,7 +949,9 @@ namespace InGameHelper
 					{
 						var method = ApplyGenericIfNeeded(mi, genericTypeName);
 						var conv = ConvertArgsToParamTypes(args, paramTypes);
-						return method.Invoke(obj, conv);
+						var result = method.Invoke(obj, conv);
+						if (result == null && method.ReturnType == typeof(void)) return obj;
+						return result;
 					}
 					catch (Exception ex)
 					{
@@ -968,6 +974,7 @@ namespace InGameHelper
 					var pa = toInvoke.GetParameters();
 					var conv = ConvertArgsToParamTypes(args, pa.Select(p => p.ParameterType).ToArray());
 					var result = toInvoke.Invoke(obj, conv);
+					if (result == null && toInvoke.ReturnType == typeof(void)) return obj;
 					if (result != null) return result;
 				}
 				catch { continue; }

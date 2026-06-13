@@ -13,6 +13,7 @@ using System.Threading;
 using System.Xml.Linq;
 using TaiwuModdingLib.Core.Plugin;
 using UnityEngine;
+using UnityEngine.EventSystems;
 
 namespace InGameHelper
 {
@@ -180,6 +181,7 @@ namespace InGameHelper
 						break;
 
 					case "front_code":
+				case "simulate_click":
 						// 前端可直接获取的数据 → 主线程协程处理
 						lock (_pendingLock) { _pendingSceneJson = json; }
 						break;
@@ -329,6 +331,9 @@ namespace InGameHelper
 					break;
 				case "front_code":
 					resultData = ExecuteFrontCode(request.RequestId, request.Params);
+					break;
+				case "simulate_click":
+					resultData = SimulateClick(request.Params);
 					break;
 			}
 
@@ -498,6 +503,59 @@ namespace InGameHelper
 			}
 
 			return JTokenConverter.ConvertToJToken(current, resultDepth);
+		}
+
+		/// <summary>模拟指针点击，通过 EventSystem 触发 IPointerClickHandler</summary>
+		private static JToken SimulateClick(Dictionary<string, object> rawParams)
+		{
+			var path = rawParams.GetValueOrDefault<string>("gameObjectPath") ?? "";
+			if (string.IsNullOrEmpty(path))
+				return new JObject { ["error"] = "gameObjectPath 不能为空" };
+
+			var go = SceneQueryService.FindGameObjectByPath(path);
+			if (go == null)
+				return new JObject { ["error"] = $"未找到 GameObject: {path}" };
+
+			if (EventSystem.current == null)
+				return new JObject { ["error"] = "EventSystem.current 为空" };
+
+			var ped = new PointerEventData(EventSystem.current);
+			// 设置一个默认的点击位置
+			var rt = go.GetComponent<RectTransform>();
+			if (rt != null)
+			{
+				var rect = rt.rect;
+				// 计算屏幕中心位置
+				var corners = new Vector3[4];
+				rt.GetWorldCorners(corners);
+				ped.position = new Vector2(
+					(corners[0].x + corners[2].x) / 2f,
+					(corners[0].y + corners[2].y) / 2f
+				);
+			}
+			else
+			{
+				ped.position = Vector2.zero;
+			}
+
+			// 查找所有 IPointerClickHandler 组件
+			var clickHandlers = go.GetComponents<IPointerClickHandler>();
+			if (clickHandlers == null || clickHandlers.Length == 0)
+				return new JObject { ["error"] = $"在 {go.name} 上找不到 IPointerClickHandler" };
+
+			int executed = 0;
+			foreach (var handler in clickHandlers)
+			{
+				ExecuteEvents.Execute(go, ped, ExecuteEvents.pointerClickHandler);
+				executed++;
+			}
+
+			return new JObject
+			{
+				["success"] = true,
+				["target"] = go.name,
+				["executed"] = executed
+			};
 		}
 
 		// ===================== 文件工具 =====================
@@ -756,7 +814,7 @@ namespace InGameHelper
 			}
 		}
 
-		private static GameObject FindGameObjectByPath(string path)
+		public static GameObject FindGameObjectByPath(string path)
 		{
 			var parts = path.Split('/');
 			if (parts.Length == 0) return null;
@@ -1049,7 +1107,10 @@ namespace InGameHelper
 					{
 						var method = ApplyGenericIfNeeded(mi, genericTypeName);
 						var conv = ConvertArgsToParamTypes(args, paramTypes);
-						return method.Invoke(obj, conv);
+						var result = method.Invoke(obj, conv);
+						// void 方法返回 null，应返回原对象以继续链式执行
+						if (result == null && method.ReturnType == typeof(void)) return obj;
+						return result;
 					}
 					catch (Exception ex)
 					{
@@ -1068,7 +1129,10 @@ namespace InGameHelper
 					var method = ApplyGenericIfNeeded(m, genericTypeName);
 					var pa = method.GetParameters();
 					var conv = ConvertArgsToParamTypes(args, pa.Select(p => p.ParameterType).ToArray());
-					return method.Invoke(obj, conv);
+					var result = method.Invoke(obj, conv);
+					// void 方法返回 null，应返回原对象以继续链式执行
+					if (result == null && method.ReturnType == typeof(void)) return obj;
+					return result;
 				}
 				catch { continue; }
 			}
