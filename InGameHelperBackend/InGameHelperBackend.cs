@@ -317,6 +317,13 @@ namespace InGameHelper
 			Logger.Info($"[Query] domain={domainName}, method={rawParams.GetValueOrDefault<string>("method")}, objectMethods={rawParams.GetValueOrDefault<string>("objectMethods") ?? "(not string)"}, hasArgs={rawParams.ContainsKey("args")}");
 			if (rawParams.TryGetValue("objectMethods", out var om)) Logger.Info($"[Query]   objectMethods raw type={om?.GetType().Name} value={om}");
 
+			// 读取序列化深度（默认 3），由调用方通过 depth 参数控制
+			int depth = 3;
+			if (rawParams.TryGetValue("depth", out var depthObj) && depthObj is long depthLong)
+				depth = (int)depthLong;
+			else if (rawParams.TryGetValue("depth", out depthObj) && depthObj is int depthInt)
+				depth = depthInt;
+
 			var t = HarmonyLib.Traverse.Create(domainObj);
 
 			// 如果指定了 method，调用域方法
@@ -354,9 +361,9 @@ namespace InGameHelper
 						};
 						return overview;
 					}
-					return BackendJTokenConverter.ConvertToJToken(fv, 3);
+					return BackendJTokenConverter.ConvertToJToken(fv, depth);
 				}
-				return BackendJTokenConverter.ConvertToJToken(result, 3);
+				return BackendJTokenConverter.ConvertToJToken(result, depth);
 			}
 
 			// 如果指定了 field，直接读取域的字段
@@ -364,7 +371,7 @@ namespace InGameHelper
 			if (!string.IsNullOrEmpty(fieldName2))
 			{
 				var fv = t.Field(fieldName2).GetValue() ?? t.Property(fieldName2).GetValue();
-				return BackendJTokenConverter.ConvertToJToken(fv, 3);
+				return BackendJTokenConverter.ConvertToJToken(fv, depth);
 			}
 
 			// 域的概览
