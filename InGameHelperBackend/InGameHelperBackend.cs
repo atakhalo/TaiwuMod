@@ -655,16 +655,36 @@ namespace InGameHelper
 
 				if (args != null && args.Length > 0)
 				{
-					// 先尝试精确类型匹配
-					try { return t.Method(methodName, args).GetValue(); }
+					// 先尝试 Traverse 精确类型匹配
+					// 注意: Traverse.Method(name,args) 在参数类型不匹配时不抛异常，
+					//       而是返回空 Traverse，GetValue() 返回 null。
+					//       因此需要同时检查异常和 null 返回值。
+					object traverseResult = null;
+					bool traverseFailed = false;
+					try
+					{
+						traverseResult = t.Method(methodName, args).GetValue();
+					}
 					catch
 					{
-						// 再尝试宽松匹配（将 object[] 转为具体类型数组）
-						var converted = ConvertToExactTypes(args);
-						if (converted != null)
+						traverseFailed = true;
+					}
+
+					if (!traverseFailed && traverseResult != null)
+						return traverseResult;
+
+					// Traverse 失败 → 改用反射+类型转换（支持 int→enum、数字类型兼容等）
+					var domainObj = t.GetValue();
+					if (domainObj != null)
+					{
+						try
 						{
-							try { return t.Method(methodName, converted).GetValue(); }
-							catch (Exception ex2) { Logger.Warn($"[InvokeDomain] 转换后调用 {methodName} 仍失败: {ex2.Message}"); }
+							var result = InvokeMethodWithEnumConversion(domainObj, methodName, args);
+							if (result != null) return result;
+						}
+						catch (Exception ex2)
+						{
+							Logger.Warn($"[InvokeDomain] 反射+类型转换调用 {methodName} 也失败: {ex2.Message}");
 						}
 					}
 				}
@@ -716,14 +736,6 @@ namespace InGameHelper
 			return args;
 		}
 
-		/// <summary>将 object[] 转为具体类型数组供 Traverse 匹配方法签名</summary>
-		private static object[] ConvertToExactTypes(object[] args)
-		{
-			if (args == null) return null;
-			// 已由 NormalizeArgs/NormalizeJArray 处理过类型，这里直接返回
-			return args;
-		}
-
 		/// <summary>
 		/// 尝试匹配并调用方法，自动将 int 参数转为目标枚举类型。
 		/// 通过反射匹配方法签名，比 Traverse.Method(name, args) 更灵活。
@@ -751,18 +763,44 @@ namespace InGameHelper
 					for (int i = 0; i < args.Length; i++)
 					{
 						var paramType = parameters[i].ParameterType;
-						if (paramType.IsEnum && args[i] is int intVal)
+						var arg = args[i];
+						if (arg == null) { convertedArgs[i] = null; continue; }
+
+						// 类型直接匹配
+						if (paramType.IsAssignableFrom(arg.GetType()))
+						{
+							convertedArgs[i] = arg;
+						}
+						else if (paramType.IsEnum && arg is int intVal)
 						{
 							convertedArgs[i] = Enum.ToObject(paramType, intVal);
 							Logger.Info($"[EnumConv]   参数 {i}: int({intVal}) → {paramType.Name}.{convertedArgs[i]}");
 						}
-						else if (paramType.IsEnum && args[i] is long longVal)
+						else if (paramType.IsEnum && arg is long longVal)
 						{
 							convertedArgs[i] = Enum.ToObject(paramType, (int)longVal);
 							Logger.Info($"[EnumConv]   参数 {i}: long({longVal}) → {paramType.Name}.{convertedArgs[i]}");
 						}
+						else if (paramType.IsEnum && arg is string s && Enum.IsDefined(paramType, s))
+						{
+							convertedArgs[i] = Enum.Parse(paramType, s);
+							Logger.Info($"[EnumConv]   参数 {i}: string({s}) → {paramType.Name}.{convertedArgs[i]}");
+						}
+						else if (arg is IConvertible && paramType.IsValueType && !paramType.IsEnum)
+						{
+							// 数字类型兼容：int→sbyte, int→short, long→int, float→double 等
+							try
+							{
+								convertedArgs[i] = Convert.ChangeType(arg, paramType);
+								Logger.Info($"[EnumConv]   参数 {i}: {arg}({arg.GetType().Name}) → {paramType.Name}({convertedArgs[i]})");
+							}
+							catch
+							{
+								convertedArgs[i] = arg;
+							}
+						}
 						else
-							convertedArgs[i] = args[i];
+							convertedArgs[i] = arg;
 					}
 					var result = method.Invoke(obj, convertedArgs);
 					Logger.Info($"[EnumConv] 调用成功, result={result} ({result?.GetType()?.Name ?? "null"})");
