@@ -166,10 +166,7 @@ namespace InGameHelper
 
 		private static void SafeWriteFile(string path, string content)
 		{
-			var tmpPath = path + ".tmp";
-			File.WriteAllText(tmpPath, content);
-			if (File.Exists(path)) File.Replace(tmpPath, path, null);
-			else File.Move(tmpPath, path);
+			File.WriteAllText(path, content);
 		}
 	}
 
