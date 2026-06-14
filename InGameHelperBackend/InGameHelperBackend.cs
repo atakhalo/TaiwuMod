@@ -401,6 +401,8 @@ namespace InGameHelper
 		[JsonProperty("stepType")] public string StepType { get; set; } // 结果类型全名
 		[JsonProperty("argTypes")] public string[] ArgTypes { get; set; } // 方法参数类型（仅 method）
 		[JsonProperty("args")] public object[] Args { get; set; }    // 方法参数值（仅 method）
+		[JsonProperty("codeArgs")] public int[] CodeArgs { get; set; }
+		// codeArgs: 参数注入标记，与 args 索引一一对应，值为 1 时表示对应 args 元素为 code 子请求
 	}
 
 	public class EntryInfo
@@ -771,19 +773,19 @@ namespace InGameHelper
 			// 尝试常见静态实例获取模式
 			try
 			{
-				var instProp = type.GetProperty("Instance", BindingFlags.Public | BindingFlags.Static);
+				var instProp = AccessTools.Property(type, "Instance");
 				if (instProp != null) return instProp.GetValue(null);
 			}
 			catch { }
 			try
 			{
-				var instField = type.GetField("Instance", BindingFlags.Public | BindingFlags.Static);
+				var instField = AccessTools.Field(type, "Instance");
 				if (instField != null) return instField.GetValue(null);
 			}
 			catch { }
 			try
 			{
-				var getInst = type.GetMethod("GetInstance", BindingFlags.Public | BindingFlags.Static, null, Type.EmptyTypes, null);
+				var getInst = AccessTools.Method(type, "GetInstance", Type.EmptyTypes);
 				if (getInst != null) return getInst.Invoke(null, null);
 			}
 			catch { }
@@ -831,7 +833,9 @@ namespace InGameHelper
 			switch (step.Step)
 			{
 				case "method":
-					return InvokeMethod(obj, step.Name, step.ArgTypes, step.Args);
+					// 处理 codeArgs：将 args 中的子请求递归解析为实际对象
+					var resolvedArgs = ResolveCodeArgs(step.Args, step.CodeArgs);
+					return InvokeMethod(obj, step.Name, step.ArgTypes, resolvedArgs);
 				case "field":
 					val = traverseTarget.Field(step.Name).GetValue();
 					if (val == null) _lastInvokeError = $"在 {objType.Name} 上找不到字段: {step.Name}";
@@ -844,6 +848,85 @@ namespace InGameHelper
 					_lastInvokeError = $"未知 step 类型: {step.Step}";
 					return null;
 			}
+		}
+
+		/// <summary>将 args 中标记为 code 子请求的参数递归解析为实际对象</summary>
+		private static object[] ResolveCodeArgs(object[] args, int[] codeArgs)
+		{
+			if (args == null || codeArgs == null || codeArgs.Length == 0)
+				return args;
+
+			// 创建副本以免修改原始 step
+			var resolved = new object[args.Length];
+			Array.Copy(args, resolved, args.Length);
+
+			for (int idx = 0; idx < codeArgs.Length && idx < resolved.Length; idx++)
+			{
+				if (codeArgs[idx] != 1) continue;
+
+				if (!(resolved[idx] is JObject subRequest)) continue;
+
+				// 子请求必须为 back_code 类型
+				var subType = subRequest["type"]?.ToString();
+				if (subType != "back_code") continue;
+
+				var subParams = subRequest["params"] as JObject;
+				if (subParams == null) continue;
+
+				// 解析子请求的 entry
+				EntryInfo entry = null;
+				if (subParams.TryGetValue("entry", out var entryObj) && entryObj is JObject entryJObj)
+					entry = entryJObj.ToObject<EntryInfo>();
+
+				// 解析子请求的 chain
+				List<BackendChainStep> subChain = null;
+				if (subParams.TryGetValue("chain", out var chainObj) && chainObj is JArray chainJArr)
+					subChain = chainJArr.ToObject<List<BackendChainStep>>();
+
+				if (entry == null) continue;
+
+				// 递归处理子请求 chain 中的 codeArgs
+				if (subChain != null)
+				{
+					foreach (var subStep in subChain)
+					{
+						if (subStep.CodeArgs != null && subStep.CodeArgs.Length > 0 && subStep.Args != null)
+						{
+							subStep.Args = ResolveCodeArgs(subStep.Args, subStep.CodeArgs);
+						}
+					}
+				}
+
+				// 执行子请求的链，得到原始对象
+				object current;
+				try
+				{
+					current = ResolveEntry(entry);
+					if (current == null)
+					{
+						Logger.Warn($"[BackendChain] codeArgs 子请求入口解析失败: {entry.Name}");
+						continue;
+					}
+					if (subChain != null && subChain.Count > 0)
+					{
+						current = ExecuteToObject(current, subChain);
+						if (current == null)
+						{
+							Logger.Warn($"[BackendChain] codeArgs 子请求链执行失败: {entry.Name}");
+							continue;
+						}
+					}
+				}
+				catch (Exception ex)
+				{
+					Logger.Warn($"[BackendChain] codeArgs 子请求异常: {ex.Message}");
+					continue;
+				}
+
+				resolved[idx] = current;
+			}
+
+			return resolved;
 		}
 
 		private static object InvokeMethod(object obj, string methodName, string[] argTypes, object[] args)
@@ -891,7 +974,7 @@ namespace InGameHelper
 			}
 
 			// 无 argTypes → 枚举尝试
-			var methods = type.GetMethods(BindingFlags.Public | BindingFlags.Static)
+			var methods = type.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)
 				.Where(m => m.Name == methodName && m.GetParameters().Length == (args?.Length ?? 0))
 				.ToList();
 
@@ -962,7 +1045,7 @@ namespace InGameHelper
 			}
 
 			// 遍历所有同名方法，参数数量匹配的，尝试枚举/数字转换后调用
-			var methods = obj.GetType().GetMethods(BindingFlags.Public | BindingFlags.Instance)
+			var methods = obj.GetType().GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
 				.Where(m => m.Name == methodName && m.GetParameters().Length == argCount)
 				.ToList();
 
