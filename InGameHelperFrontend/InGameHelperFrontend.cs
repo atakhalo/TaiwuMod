@@ -1289,7 +1289,7 @@ namespace InGameHelper
 		}
 
 		/// <summary>将 args 中标记为 code 子请求的参数递归解析为实际对象</summary>
-		private static object[] ResolveCodeArgs(object[] args, int[] codeArgs)
+		private static object[] ResolveCodeArgs(object[] args, int[] codeArgs, string stepName = null)
 		{
 			if (args == null || codeArgs == null || codeArgs.Length == 0)
 				return args;
@@ -1297,18 +1297,38 @@ namespace InGameHelper
 			// 创建副本以免修改原始 step
 			var resolved = new object[args.Length];
 			Array.Copy(args, resolved, args.Length);
+			bool anyFailed = false;
 
 			for (int idx = 0; idx < codeArgs.Length && idx < resolved.Length; idx++)
 			{
 				if (codeArgs[idx] != 1) continue;
-				if (!(resolved[idx] is JObject subRequest)) continue;
+
+				if (!(resolved[idx] is JObject subRequest))
+				{
+					MyUtils.MyLog($"[FrontendChain] codeArgs: 索引 {idx} 不是 JObject，置 null");
+					resolved[idx] = null;
+					anyFailed = true;
+					continue;
+				}
 
 				// 子请求必须为 front_code 类型（前端只支持同类型注入）
 				var subType = subRequest["type"]?.ToString();
-				if (subType != "front_code") continue;
+				if (subType != "front_code")
+				{
+					MyUtils.MyLog($"[FrontendChain] codeArgs: 索引 {idx} 子请求类型 {subType} 不是 front_code，置 null");
+					resolved[idx] = null;
+					anyFailed = true;
+					continue;
+				}
 
 				var subParams = subRequest["params"] as JObject;
-				if (subParams == null) continue;
+				if (subParams == null)
+				{
+					MyUtils.MyLog($"[FrontendChain] codeArgs: 索引 {idx} 子请求 params 为空，置 null");
+					resolved[idx] = null;
+					anyFailed = true;
+					continue;
+				}
 
 				// 解析子请求的 entry
 				EntryInfo entry = null;
@@ -1320,7 +1340,13 @@ namespace InGameHelper
 				if (subParams.TryGetValue("chain", out var chainObj) && chainObj is JArray chainJArr)
 					subChain = chainJArr.ToObject<List<FrontendChainStep>>();
 
-				if (entry == null) continue;
+				if (entry == null)
+				{
+					MyUtils.MyLog($"[FrontendChain] codeArgs: 索引 {idx} entry 解析失败，置 null");
+					resolved[idx] = null;
+					anyFailed = true;
+					continue;
+				}
 
 				// 递归处理子请求 chain 中的 codeArgs
 				if (subChain != null)
@@ -1329,7 +1355,7 @@ namespace InGameHelper
 					{
 						if (subStep.CodeArgs != null && subStep.CodeArgs.Length > 0 && subStep.Args != null)
 						{
-							subStep.Args = ResolveCodeArgs(subStep.Args, subStep.CodeArgs);
+							subStep.Args = ResolveCodeArgs(subStep.Args, subStep.CodeArgs, subStep.Name);
 						}
 					}
 				}
@@ -1341,7 +1367,9 @@ namespace InGameHelper
 					current = ResolveEntry(entry);
 					if (current == null)
 					{
-						MyUtils.MyLog($"[FrontendChain] codeArgs 子请求入口解析失败: {entry.Name}");
+						MyUtils.MyLog($"[FrontendChain] codeArgs 索引 {idx} 子请求入口解析失败: {entry.Name}，置 null");
+						resolved[idx] = null;
+						anyFailed = true;
 						continue;
 					}
 					if (subChain != null && subChain.Count > 0)
@@ -1349,18 +1377,27 @@ namespace InGameHelper
 						current = ExecuteToObject(current, subChain);
 						if (current == null)
 						{
-							MyUtils.MyLog($"[FrontendChain] codeArgs 子请求链执行失败: {entry.Name}");
+							MyUtils.MyLog($"[FrontendChain] codeArgs 索引 {idx} 子请求链执行失败: {entry.Name}，置 null");
+							resolved[idx] = null;
+							anyFailed = true;
 							continue;
 						}
 					}
 				}
 				catch (Exception ex)
 				{
-					MyUtils.MyLog($"[FrontendChain] codeArgs 子请求异常: {ex.Message}");
+					MyUtils.MyLog($"[FrontendChain] codeArgs 索引 {idx} 子请求异常: {ex.Message}，置 null");
+					resolved[idx] = null;
+					anyFailed = true;
 					continue;
 				}
 
 				resolved[idx] = current;
+			}
+
+			if (anyFailed)
+			{
+				_lastInvokeError = $"codeArgs 参数注入失败（步骤: {stepName ?? "?"}），已注入的 {resolved.Count(r => r != null && !(r is JObject))}/{codeArgs.Length} 个参数";
 			}
 
 			return resolved;
