@@ -647,8 +647,8 @@ namespace NpcFace
 			foreach (var t1 in ts)
             {
                 if (t1.name.Contains("name") || t1.name.Contains("Name")
-                    && t1.name != "OrganizationName" && t1.name != "SkillName"
-                    && !t1.text.Contains("ID:") && t1.text!="剩余潜力")  // mod添加的控件
+                    && t1.name != "OrganizationName" && t1.name != "SkillName" && t1.name != "ProfessionName"
+					&& !t1.text.Contains("ID:") && t1.text!="剩余潜力")  // mod添加的控件
                 {
                     t = t1;
                     break;
@@ -706,6 +706,22 @@ namespace NpcFace
 
 		public static string TryGetNpcNameSp(Transform transform)
 		{
+			// MyUtils.MyLog("TryGetNpcNameSp");
+			// 事件界面
+			if (transform.parent.name == "AvatarArea")
+			{
+				if(transform.parent.parent.name == "CanvasChanger")
+				{
+					var r = transform.parent.parent?.GetChild(4)?.GetChild(0)?.GetChild(0);
+					if(r)
+					{
+						var t = r.GetComponent < TextMeshProUGUI>();
+						if (t) return t.text;
+						else { MyUtils.MyLog("事件窗口更新，需要适配"); return null; }
+					}
+				}
+			}
+
 			// 地图人物列表 关注界面
 			if (transform.parent.name == "AvatarRect")
 			{
@@ -1026,6 +1042,7 @@ namespace NpcFace
 
 		public static bool FillElement_Wrapper(CharacterAvatar avatar)
 		{
+			if(avatar == null) return true;
 			if (FillElement_Post(avatar)) return true;
 			else FillElement_Origin(avatar); return false;
 		}
