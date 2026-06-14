@@ -182,6 +182,7 @@ namespace InGameHelper
 
 					case "front_code":
 				case "simulate_click":
+				case "shop_buy_filtered":
 						// 前端可直接获取的数据 → 主线程协程处理
 						lock (_pendingLock) { _pendingSceneJson = json; }
 						break;
@@ -334,6 +335,9 @@ namespace InGameHelper
 					break;
 				case "simulate_click":
 					resultData = SimulateClick(request.Params);
+					break;
+				case "shop_buy_filtered":
+					resultData = ShopBuyFiltered(request.Params);
 					break;
 			}
 
@@ -556,6 +560,266 @@ namespace InGameHelper
 				["target"] = go.name,
 				["executed"] = executed
 			};
+		}
+
+		/// <summary>
+		/// 通用商店筛选购买。通过 filters 参数指定筛选条件，只将匹配的商品加入交换列表。
+		/// filter 每项格式：
+		/// {
+		///   "itemType": sbyte,   // 物品类型（5=Material, 7=Food...），可选
+		///   "minGrade": sbyte,   // 最低品级（含），可选
+		///   "maxGrade": sbyte,   // 最高品级（含），可选
+		///   "templateId": int,   // 具体模板ID，可选
+		///   "name": string,      // 商品名包含（模糊匹配），可选
+		///   "amount": int,       // 购买数量（0=全部），可选，默认全部
+		///   "maxPrice": int,     // 最高单价，可选
+		/// }
+		/// 条件之间是与(AND)关系。
+		/// </summary>
+		private static JToken ShopBuyFiltered(Dictionary<string, object> rawParams)
+		{
+			var shopGo = SceneQueryService.FindGameObjectByPath("Camera_UIRoot/Canvas/LayerPopUp/ViewShop");
+			if (shopGo == null)
+				return new JObject { ["error"] = "未找到 ViewShop" };
+
+			var viewShop = shopGo.GetComponent("ViewShop");
+			if (viewShop == null)
+				return new JObject { ["error"] = "未找到 ViewShop 组件" };
+
+			var t = HarmonyLib.Traverse.Create(viewShop);
+
+			// 获取 Exchange 对象
+			var exchange = t.Property("Exchange").GetValue();
+			if (exchange == null)
+				return new JObject { ["error"] = "Exchange 为空" };
+
+			// 获取商品列表
+			var listObj = t.Method("GetTargetTradeableList").GetValue();
+			if (listObj == null)
+				return new JObject { ["error"] = "GetTargetTradeableList 返回空" };
+
+			var itemList = listObj as System.Collections.IList;
+			if (itemList == null)
+				return new JObject { ["error"] = "商品列表不是 IList" };
+
+			// 解析筛选条件
+			var filters = new List<JObject>();
+			if (rawParams.TryGetValue("filters", out var filtersVal) && filtersVal is JArray filtersArr)
+			{
+				foreach (var f in filtersArr)
+				{
+					if (f is JObject jo)
+						filters.Add(jo);
+				}
+			}
+			// 如果没有筛选条件，默认只买材料
+			if (filters.Count == 0)
+			{
+				filters.Add(new JObject { ["itemType"] = 5 });
+			}
+
+			int addedCount = 0;
+			int skippedCount = 0;
+			var addedItems = new JArray();
+
+			// 遍历所有商品
+			foreach (var item in itemList)
+			{
+				if (item == null) continue;
+
+				var itemTraverse = HarmonyLib.Traverse.Create(item);
+
+				// 读取 Key
+				var key = itemTraverse.Property("Key").GetValue();
+				if (key == null) { skippedCount++; continue; }
+
+				var keyTraverse = HarmonyLib.Traverse.Create(key);
+
+				// 读取字段（全部提前读出）
+				sbyte itemType = GetSbyte(keyTraverse.Field("ItemType").GetValue());
+				short templateId = GetShort(keyTraverse.Field("TemplateId").GetValue());
+				int itemId = GetInt(keyTraverse.Field("Id").GetValue());
+
+				// 读取 PricePercent（涨跌价%，负=降价，正=涨价）
+				int pricePercent = GetInt(itemTraverse.Field("PricePercent").GetValue());
+
+				// 读取 Grade（property，范围 0~9，-1 表示无）
+				var gradeVal = itemTraverse.Property("Grade").GetValue();
+				sbyte grade = -1;
+				if (gradeVal is sbyte gsb) grade = gsb;
+				else if (gradeVal is int giv) grade = (sbyte)giv;
+
+				int amount = GetInt(itemTraverse.Field("Amount").GetValue());
+				int value = GetInt(itemTraverse.Field("Value").GetValue()); // 单价
+
+				// 读取商品名（ToString 中有名字，但更准确的方式是查 TemplateId 对应配置）
+				// 用 ToString() 取个简短名字
+				var rawName = item.ToString() ?? "";
+				var itemName = ExtractNameFromString(rawName);
+
+				// 检查是否匹配任一筛选条件（条件之间 OR）
+				bool matched = false;
+				JObject matchedFilter = null;
+				foreach (var filter in filters)
+				{
+					if (MatchFilter(item, itemTraverse, keyTraverse,
+						itemType, templateId, itemId, grade, amount, value, itemName, pricePercent,
+						filter))
+					{
+						matched = true;
+						matchedFilter = filter;
+						break;
+					}
+				}
+
+				if (!matched)
+				{
+					skippedCount++;
+					continue;
+				}
+
+				// 确定购买数量
+				int buyAmount = amount; // 默认全部
+				if (matchedFilter != null && matchedFilter.TryGetValue("amount", out var amtToken))
+				{
+					int reqAmt = amtToken.Value<int>();
+					if (reqAmt > 0 && reqAmt < buyAmount)
+						buyAmount = reqAmt;
+				}
+
+				// 调用 Exchange.SelectTargetItem(item, buyAmount)
+				var exchangeTraverse = HarmonyLib.Traverse.Create(exchange);
+				try
+				{
+					exchangeTraverse.Method("SelectTargetItem", new object[] { item, buyAmount }).GetValue();
+					addedCount++;
+					addedItems.Add(new JObject
+					{
+						["name"] = itemName,
+						["type"] = itemType,
+						["grade"] = grade,
+						["amount"] = buyAmount,
+						["raw"] = rawName.Length > 80 ? rawName.Substring(0, 80) : rawName
+					});
+				}
+				catch (Exception ex)
+				{
+					MyUtils.MyLog($"ShopBuyFiltered: SelectTargetItem 失败: {ex.Message}");
+				}
+			}
+
+			// 调用 Refresh 更新 UI
+			try { t.Method("Refresh").GetValue(); } catch { }
+
+			return new JObject
+			{
+				["success"] = true,
+				["totalItems"] = itemList.Count,
+				["added"] = addedCount,
+				["skipped"] = skippedCount,
+				["items"] = addedItems
+			};
+		}
+
+		/// <summary>检查单个商品是否匹配筛选条件</summary>
+		private static bool MatchFilter(object item, HarmonyLib.Traverse itemTraverse, HarmonyLib.Traverse keyTraverse,
+			sbyte itemType, short templateId, int itemId, sbyte grade, int amount, int value, string itemName, int pricePercent,
+			JObject filter)
+		{
+			// itemType 匹配
+			if (filter.TryGetValue("itemType", out var itToken))
+			{
+				var reqType = itToken.Value<int>();
+				if (itemType != (sbyte)reqType) return false;
+			}
+
+			// templateId 匹配（具体商品）
+			if (filter.TryGetValue("templateId", out var tplToken))
+			{
+				var reqTpl = tplToken.Value<int>();
+				if (templateId != reqTpl) return false;
+			}
+
+			// 品级下限
+			if (filter.TryGetValue("minGrade", out var minGToken))
+			{
+				var minG = minGToken.Value<int>();
+				if (grade < (sbyte)minG) return false;
+			}
+
+			// 品级上限
+			if (filter.TryGetValue("maxGrade", out var maxGToken))
+			{
+				var maxG = maxGToken.Value<int>();
+				if (grade > (sbyte)maxG) return false;
+			}
+
+			// 商品名模糊匹配
+			if (filter.TryGetValue("name", out var nameToken))
+			{
+				var namePattern = nameToken.Value<string>();
+				if (!string.IsNullOrEmpty(namePattern) && !itemName.Contains(namePattern))
+					return false;
+			}
+
+			// 最高单价
+			if (filter.TryGetValue("maxPrice", out var priceToken))
+			{
+				var maxPrice = priceToken.Value<int>();
+				if (value > maxPrice) return false;
+			}
+
+			// 涨跌价筛选：pricePercent<0=降价, pricePercent>0=涨价, pricePercent=0=原价
+			if (filter.TryGetValue("pricePercent", out var ppToken))
+			{
+				var ppVal = ppToken.Value<int>();
+				if (ppVal < 0 && pricePercent >= 0) return false;  // 要降价，但实际非降价
+				if (ppVal > 0 && pricePercent <= 0) return false;  // 要涨价，但实际非涨价
+				if (ppVal == 0 && pricePercent != 0) return false; // 要原价，但实际有涨跌
+			}
+
+			return true; // 所有条件通过
+		}
+
+		/// <summary>从 ItemDisplayData.ToString() 中提取商品名</summary>
+		private static string ExtractNameFromString(string raw)
+		{
+			// 格式: "ItemDisplayData({Material, 绍兴麻鸭 (58), 137569, 1000}, 3, 0/0)"
+			try
+			{
+				var start = raw.IndexOf(", ") + 2;
+				var end = raw.IndexOf(" (");
+				if (start > 1 && end > start)
+					return raw.Substring(start, end - start);
+			}
+			catch { }
+			return raw;
+		}
+
+		private static sbyte GetSbyte(object val)
+		{
+			if (val is sbyte sb) return sb;
+			if (val is int iv) return (sbyte)iv;
+			if (val is long lv) return (sbyte)lv;
+			if (val is byte bv) return (sbyte)bv;
+			return -1;
+		}
+
+		private static short GetShort(object val)
+		{
+			if (val is short s) return s;
+			if (val is int iv) return (short)iv;
+			if (val is long lv) return (short)lv;
+			if (val is byte bv) return bv;
+			return -1;
+		}
+
+		private static int GetInt(object val)
+		{
+			if (val is int iv) return iv;
+			if (val is long lv) return (int)lv;
+			if (val is short sv) return sv;
+			return 1;
 		}
 
 		// ===================== 文件工具 =====================
