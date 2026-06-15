@@ -5,11 +5,22 @@
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-	<OutputPath>C:\Program Files (x86)\Steam\steamapps\common\The Scroll Of Taiwu\Mod\运行时助手\Plugins\Back</OutputPath>
+	<OutputPath>C:\Program Files (x86)\Steam\steamapps\common\The Scroll Of Taiwu\Mod\运行时助手\Plugins\BackLib</OutputPath>
 	<AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
 	<CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
 	<SatelliteResourceLanguages>en</SatelliteResourceLanguages>
   </PropertyGroup>
+
+  <!-- 构建后：主 DLL 复制到 Back，依赖保留在 BackLib -->
+  <Target Name="CopyToBack" AfterTargets="CopyFilesToOutputDirectory">
+    <Copy SourceFiles="$(OutputPath)$(AssemblyName).deps.json" DestinationFolder="C:\Program Files (x86)\Steam\steamapps\common\The Scroll Of Taiwu\Mod\运行时助手\Plugins\Back" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(OutputPath)$(AssemblyName).dll" DestinationFolder="C:\Program Files (x86)\Steam\steamapps\common\The Scroll Of Taiwu\Mod\运行时助手\Plugins\Back" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(OutputPath)$(AssemblyName).pdb" DestinationFolder="C:\Program Files (x86)\Steam\steamapps\common\The Scroll Of Taiwu\Mod\运行时助手\Plugins\Back" SkipUnchangedFiles="true" Condition="Exists('$(OutputPath)$(AssemblyName).pdb')" />
+    <!-- 清理 Lib 目录中非 DLL 的文件 -->
+    <Delete Files="$(OutputPath)$(AssemblyName).deps.json" ContinueOnError="true" />
+    <Delete Files="$(OutputPath)$(AssemblyName).dll" ContinueOnError="true" />
+    <Delete Files="$(OutputPath)$(AssemblyName).pdb" ContinueOnError="true" />
+  </Target>
 
   <ItemGroup>
     <Reference Include="0Harmony">

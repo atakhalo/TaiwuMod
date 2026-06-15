@@ -43,30 +43,30 @@ namespace InGameHelper
 		{
 			Logger.Info("[InGameHelperBackend] Initialize");
 
-			// 注册程序集解析事件：从 mod 目录 Plugins\Back 加载依赖（Microsoft.CodeAnalysis 等）
+			// 注册程序集解析事件：从 mod 目录 Plugins\BackLib 加载依赖（Microsoft.CodeAnalysis 等）
 			try
 			{
 				var modDir = DomainManager.Mod.GetModDirectory(ModIdStr);
 				if (!string.IsNullOrEmpty(modDir))
 				{
+					var libDir = Path.Combine(modDir, "Plugins", "BackLib");
 					var pluginDir = Path.Combine(modDir, "Plugins", "Back");
 					var commonDir = Path.Combine(modDir, "Plugins", "CommonLib");
-					if (Directory.Exists(pluginDir))
+					if (Directory.Exists(libDir))
 					{
 						AssemblyLoadContext.Default.Resolving += (context, assemblyName) =>
 						{
 							try
 							{
-								// 先搜 Back 目录，再搜 CommonLib 目录
-								var asmPath = Path.Combine(pluginDir, assemblyName.Name + ".dll");
+								// 先搜 BackLib，再搜 Back，再搜 CommonLib
+								var name = assemblyName.Name;
+								var asmPath = Path.Combine(libDir, name + ".dll");
+								if (!File.Exists(asmPath) && Directory.Exists(pluginDir))
+									asmPath = Path.Combine(pluginDir, name + ".dll");
+								if (!File.Exists(asmPath) && Directory.Exists(commonDir))
+									asmPath = Path.Combine(commonDir, name + ".dll");
 								if (File.Exists(asmPath))
 									return context.LoadFromAssemblyPath(asmPath);
-								if (Directory.Exists(commonDir))
-								{
-									asmPath = Path.Combine(commonDir, assemblyName.Name + ".dll");
-									if (File.Exists(asmPath))
-										return context.LoadFromAssemblyPath(asmPath);
-								}
 							}
 							catch (Exception ex)
 							{
@@ -74,7 +74,7 @@ namespace InGameHelper
 							}
 							return null;
 						};
-						Logger.Info($"[InGameHelperBackend] AssemblyLoadContext 已注册，插件目录: {pluginDir}, commonDir: {commonDir}");
+						Logger.Info($"[InGameHelperBackend] AssemblyLoadContext 已注册，libDir: {libDir}, pluginDir: {pluginDir}");
 					}
 				}
 			}
@@ -460,10 +460,22 @@ namespace InGameHelper
 
 			try
 			{
-				// 缓存 MetadataReferences（避免每次遍历 AppDomain）
+				// 缓存 MetadataReferences（包含 CommonLib 的显式引用）
 				if (_backCachedRefsRaw == null)
 				{
 					var refs = new List<MetadataReference>();
+
+					// 显式添加 InGameHelperCommon.dll（从 CommonLib 目录）
+					try
+					{
+						var modDir = DomainManager.Mod.GetModDirectory("InGameHelperBackend");
+						var commonDir = Path.Combine(modDir, "Plugins", "CommonLib");
+						var commonPath = Path.Combine(commonDir, "InGameHelperCommon.dll");
+						if (File.Exists(commonPath))
+							refs.Add(MetadataReference.CreateFromFile(commonPath));
+					}
+					catch { }
+
 					foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
 					{
 						try

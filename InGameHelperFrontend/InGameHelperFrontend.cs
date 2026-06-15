@@ -50,29 +50,35 @@ namespace InGameHelper
 		// 后端结果等待
 		private DateTime _lastBackendResultTime = DateTime.MinValue;
 		private string _pendingDataRequestId; // 正在等待的数据请求ID
+		private static string _commonLibDir; // 由 Initialize 缓存，供静态 ExecuteFrontCs 使用
 
 			public override void Initialize()
 		{
 			MyUtils.modName = nameof(InGameHelper);
 			MyUtils.MyLog("Initialize");
 
-			// 预加载 Plugins\Front 和 Plugins\CommonLib 中的依赖 DLL
+			// 预加载 Plugins\FrontLib 和 Plugins\CommonLib 中的依赖 DLL
 			try
 			{
 				var modInfo = ModManager.GetModInfo(ModIdStr);
-				var pluginDir = Path.Combine(modInfo.DirectoryName, "Plugins", "Front");
-				var commonDir = Path.Combine(modInfo.DirectoryName, "Plugins", "CommonLib");
-				if (Directory.Exists(pluginDir))
+				var baseDir = modInfo.DirectoryName;
+				var libDir = Path.Combine(baseDir, "Plugins", "FrontLib");
+				var pluginDir = Path.Combine(baseDir, "Plugins", "Front");
+				_commonLibDir = Path.Combine(baseDir, "Plugins", "CommonLib");
+
+				if (Directory.Exists(libDir))
 				{
-					// 注册 AssemblyResolve 做兜底
+					// 注册 AssemblyResolve 做兜底：先搜 FrontLib，再搜 Front，再搜 CommonLib
 					AppDomain.CurrentDomain.AssemblyResolve += (sender, args) =>
 					{
 						try
 						{
 							var name = new AssemblyName(args.Name).Name;
-							var asmPath = Path.Combine(pluginDir, name + ".dll");
-							if (!File.Exists(asmPath) && Directory.Exists(commonDir))
-								asmPath = Path.Combine(commonDir, name + ".dll");
+							var asmPath = Path.Combine(libDir, name + ".dll");
+							if (!File.Exists(asmPath) && Directory.Exists(pluginDir))
+								asmPath = Path.Combine(pluginDir, name + ".dll");
+							if (!File.Exists(asmPath) && Directory.Exists(_commonLibDir))
+								asmPath = Path.Combine(_commonLibDir, name + ".dll");
 							if (File.Exists(asmPath))
 								return Assembly.Load(File.ReadAllBytes(asmPath));
 						}
@@ -92,9 +98,9 @@ namespace InGameHelper
 					};
 					foreach (var dll in preload)
 					{
-						var p = Path.Combine(pluginDir, dll);
-						if (!File.Exists(p) && Directory.Exists(commonDir))
-							p = Path.Combine(commonDir, dll);
+						var p = Path.Combine(libDir, dll);
+						if (!File.Exists(p) && Directory.Exists(_commonLibDir))
+							p = Path.Combine(_commonLibDir, dll);
 						if (File.Exists(p))
 						{
 							try { Assembly.Load(File.ReadAllBytes(p)); MyUtils.MyLog($"已加载: {dll}"); }
@@ -621,10 +627,16 @@ namespace InGameHelper
 
 			try
 			{
-				// 缓存 MetadataReferences
+				// 缓存 MetadataReferences（包含 CommonLib 的显式引用）
 				if (_frontCachedRefsRaw == null)
 				{
 					var refs = new List<MetadataReference>();
+
+					// 显式添加 InGameHelperCommon.dll（从 CommonLib 目录，Assembly.Load 后 Location 为空）
+					var commonPath = Path.Combine(_commonLibDir, "InGameHelperCommon.dll");
+					if (File.Exists(commonPath))
+						refs.Add(MetadataReference.CreateFromFile(commonPath));
+
 					foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
 					{
 						try
