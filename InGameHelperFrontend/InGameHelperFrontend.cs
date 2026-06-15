@@ -1,4 +1,5 @@
-﻿using FrameWork.ModSystem;
+﻿#pragma warning disable CS8618, CS8600, CS8603, CS8625, CS8601, CS8604
+using FrameWork.ModSystem;
 using HarmonyLib;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -14,6 +15,10 @@ using System.Xml.Linq;
 using TaiwuModdingLib.Core.Plugin;
 using UnityEngine;
 using UnityEngine.EventSystems;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Scripting;
+using Microsoft.CodeAnalysis.Scripting;
 
 namespace InGameHelper
 {
@@ -50,6 +55,59 @@ namespace InGameHelper
 		{
 			MyUtils.modName = nameof(InGameHelper);
 			MyUtils.MyLog("Initialize");
+
+			// 预加载 Plugins\Front 和 Plugins\CommonLib 中的依赖 DLL
+			try
+			{
+				var modInfo = ModManager.GetModInfo(ModIdStr);
+				var pluginDir = Path.Combine(modInfo.DirectoryName, "Plugins", "Front");
+				var commonDir = Path.Combine(modInfo.DirectoryName, "Plugins", "CommonLib");
+				if (Directory.Exists(pluginDir))
+				{
+					// 注册 AssemblyResolve 做兜底
+					AppDomain.CurrentDomain.AssemblyResolve += (sender, args) =>
+					{
+						try
+						{
+							var name = new AssemblyName(args.Name).Name;
+							var asmPath = Path.Combine(pluginDir, name + ".dll");
+							if (!File.Exists(asmPath) && Directory.Exists(commonDir))
+								asmPath = Path.Combine(commonDir, name + ".dll");
+							if (File.Exists(asmPath))
+								return Assembly.Load(File.ReadAllBytes(asmPath));
+						}
+						catch { }
+						return null;
+					};
+
+					// 预加载 Roslyn 相关 DLL + CommonLib
+					var preload = new[] {
+						"System.Collections.Immutable.dll",
+						"System.Reflection.Metadata.dll",
+						"Microsoft.CodeAnalysis.dll",
+						"Microsoft.CodeAnalysis.CSharp.dll",
+						"Microsoft.CodeAnalysis.Scripting.dll",
+						"Microsoft.CodeAnalysis.CSharp.Scripting.dll",
+						"InGameHelperCommon.dll",
+					};
+					foreach (var dll in preload)
+					{
+						var p = Path.Combine(pluginDir, dll);
+						if (!File.Exists(p) && Directory.Exists(commonDir))
+							p = Path.Combine(commonDir, dll);
+						if (File.Exists(p))
+						{
+							try { Assembly.Load(File.ReadAllBytes(p)); MyUtils.MyLog($"已加载: {dll}"); }
+							catch (Exception ex) { MyUtils.MyLog($"加载 {dll} 失败: {ex.Message}"); }
+						}
+					}
+				}
+			}
+			catch (Exception ex)
+			{
+				MyUtils.MyLog($"AssemblyResolve 初始化失败: {ex.Message}");
+			}
+
 			_harmony = Harmony.CreateAndPatchAll(typeof(InGameHelperFrontendPlugin));
 			TryLoadConfig();
 			StartWatchers();
@@ -181,6 +239,7 @@ namespace InGameHelper
 						break;
 
 					case "front_code":
+				case "front_cs":
 				case "simulate_click":
 				case "shop_buy_filtered":
 						// 前端可直接获取的数据 → 主线程协程处理
@@ -303,6 +362,14 @@ namespace InGameHelper
 				catch (Exception ex)
 				{
 					MyUtils.MyLog($"场景请求处理异常: {ex.Message}");
+					// 异常时也要写错误响应，避免外部超时
+					try
+					{
+						var errReq = JsonConvert.DeserializeObject<GameRequest>(json);
+						if (errReq != null && !string.IsNullOrEmpty(errReq.RequestId))
+							WriteResponse(new GameResponse { RequestId = errReq.RequestId, Success = false, Error = ex.Message });
+					}
+					catch { }
 				}
 			}
 		}
@@ -332,6 +399,9 @@ namespace InGameHelper
 					break;
 				case "front_code":
 					resultData = ExecuteFrontCode(request.RequestId, request.Params);
+					break;
+				case "front_cs":
+					resultData = ExecuteFrontCs(request.Params);
 					break;
 				case "simulate_click":
 					resultData = SimulateClick(request.Params);
@@ -507,6 +577,105 @@ namespace InGameHelper
 			}
 
 			return JTokenConverter.ConvertToJToken(current, resultDepth);
+		}
+
+		/// <summary>在前端(Unity)动态执行C#代码。参数化复用模式，与后端一致。</summary>
+		private static readonly Dictionary<int, object> _frontScriptCache = new Dictionary<int, object>();
+		private static readonly object _frontScriptCacheLock = new object();
+		private static List<object> _frontCachedRefsRaw;
+
+		private static JToken ExecuteFrontCs(Dictionary<string, object> rawParams)
+		{
+			if (rawParams == null)
+				return new JObject { ["error"] = "params 不能为空" };
+
+			// 获取 code 或 codeFile
+			string code = rawParams.GetValueOrDefault<string>("code") ?? "";
+			string codeFile = rawParams.GetValueOrDefault<string>("codeFile") ?? "";
+
+			if (string.IsNullOrEmpty(code) && !string.IsNullOrEmpty(codeFile))
+			{
+				if (File.Exists(codeFile))
+					code = SafeReadAllText(codeFile);
+				else
+					return new JObject { ["error"] = $"codeFile 不存在: {codeFile}" };
+			}
+
+			if (string.IsNullOrEmpty(code))
+				return new JObject { ["error"] = "code 或 codeFile 不能为空" };
+
+			// 解析 resultDepth（默认 3）
+			int resultDepth = 3;
+			if (rawParams.TryGetValue("resultDepth", out var depthVal))
+			{
+				if (depthVal is long dl) resultDepth = (int)dl;
+				else if (depthVal is int di) resultDepth = di;
+			}
+
+			// 解析 globals 参数
+			Dictionary<string, object> globals = null;
+			if (rawParams.TryGetValue("globals", out var globalsObj) && globalsObj is Newtonsoft.Json.Linq.JObject globJObj)
+			{
+				globals = globJObj.ToObject<Dictionary<string, object>>();
+			}
+
+			try
+			{
+				// 缓存 MetadataReferences
+				if (_frontCachedRefsRaw == null)
+				{
+					var refs = new List<MetadataReference>();
+					foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+					{
+						try
+						{
+							if (!asm.IsDynamic && !string.IsNullOrEmpty(asm.Location))
+								refs.Add(MetadataReference.CreateFromFile(asm.Location));
+						}
+						catch { }
+					}
+					_frontCachedRefsRaw = refs.Select(r => (object)r).ToList();
+				}
+				var asmReferences = _frontCachedRefsRaw.Cast<MetadataReference>().ToList();
+
+				var scriptOptions = ScriptOptions.Default
+					.WithImports(
+						"System", "System.Collections.Generic", "System.Linq",
+						"System.Text", "System.IO", "System.Reflection",
+						"UnityEngine", "Newtonsoft.Json", "Newtonsoft.Json.Linq",
+						"InGameHelper.Common"
+					)
+					.WithReferences(asmReferences);
+
+				// 按 code 哈希缓存 Script 对象，globals 类型为 FrontendCsGlobals
+				var codeHash = code.GetHashCode();
+				Script<object> script;
+				lock (_frontScriptCacheLock)
+				{
+					if (!_frontScriptCache.TryGetValue(codeHash, out var cached))
+					{
+						script = CSharpScript.Create<object>(code, scriptOptions, typeof(InGameHelper.Common.FrontendCsGlobals));
+						_frontScriptCache[codeHash] = script;
+					}
+					else
+					{
+						script = (Script<object>)cached;
+					}
+				}
+
+				var globalsInstance = new InGameHelper.Common.FrontendCsGlobals { Params = globals ?? new Dictionary<string, object>() };
+				var result = script.RunAsync(globalsInstance).GetAwaiter().GetResult().ReturnValue;
+
+				if (result == null)
+					return new JObject { ["success"] = true, ["resultType"] = "null" };
+
+				return JTokenConverter.ConvertToJToken(result, resultDepth);
+			}
+			catch (Exception ex)
+			{
+				MyUtils.MyLog($"[ExecuteFrontCs] 脚本执行失败: {ex.Message}");
+				return new JObject { ["error"] = $"脚本执行失败: {ex.Message}" };
+			}
 		}
 
 		/// <summary>模拟指针点击，通过 EventSystem 触发 IPointerClickHandler</summary>

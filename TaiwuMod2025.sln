@@ -33,6 +33,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "InGameHelperFrontend", "InG
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "InGameHelperBackend", "InGameHelperBackend\InGameHelperBackend.csproj", "{13E2532C-D00C-4D4C-A368-AB8B765F040E}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "InGameHelperCommon", "InGameHelperCommon\InGameHelperCommon.csproj", "{2B323475-D0B3-4D61-B326-6CA4276A61A8}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -223,6 +225,18 @@ Global
 		{13E2532C-D00C-4D4C-A368-AB8B765F040E}.Release|x64.Build.0 = Release|Any CPU
 		{13E2532C-D00C-4D4C-A368-AB8B765F040E}.Release|x86.ActiveCfg = Release|Any CPU
 		{13E2532C-D00C-4D4C-A368-AB8B765F040E}.Release|x86.Build.0 = Release|Any CPU
+		{2B323475-D0B3-4D61-B326-6CA4276A61A8}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{2B323475-D0B3-4D61-B326-6CA4276A61A8}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{2B323475-D0B3-4D61-B326-6CA4276A61A8}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{2B323475-D0B3-4D61-B326-6CA4276A61A8}.Debug|x64.Build.0 = Debug|Any CPU
+		{2B323475-D0B3-4D61-B326-6CA4276A61A8}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{2B323475-D0B3-4D61-B326-6CA4276A61A8}.Debug|x86.Build.0 = Debug|Any CPU
+		{2B323475-D0B3-4D61-B326-6CA4276A61A8}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{2B323475-D0B3-4D61-B326-6CA4276A61A8}.Release|Any CPU.Build.0 = Release|Any CPU
+		{2B323475-D0B3-4D61-B326-6CA4276A61A8}.Release|x64.ActiveCfg = Release|Any CPU
+		{2B323475-D0B3-4D61-B326-6CA4276A61A8}.Release|x64.Build.0 = Release|Any CPU
+		{2B323475-D0B3-4D61-B326-6CA4276A61A8}.Release|x86.ActiveCfg = Release|Any CPU
+		{2B323475-D0B3-4D61-B326-6CA4276A61A8}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

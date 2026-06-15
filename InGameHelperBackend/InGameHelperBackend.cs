@@ -1,4 +1,6 @@
-﻿using GameData.Domains;
+﻿#pragma warning disable CS8618, CS8600, CS8603, CS8625, CS8601, CS8604
+
+using GameData.Domains;
 using GameData.Domains.Character;
 using GameData.Domains.Mod;
 using GameData.Domains.Taiwu;
@@ -14,6 +16,11 @@ using System.Linq;
 using System.Reflection;
 using System.Xml.Linq;
 using TaiwuModdingLib.Core.Plugin;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Scripting;
+using Microsoft.CodeAnalysis.Scripting;
+using System.Runtime.Loader;
 
 namespace InGameHelper
 {
@@ -35,6 +42,47 @@ namespace InGameHelper
 		public override void Initialize()
 		{
 			Logger.Info("[InGameHelperBackend] Initialize");
+
+			// 注册程序集解析事件：从 mod 目录 Plugins\Back 加载依赖（Microsoft.CodeAnalysis 等）
+			try
+			{
+				var modDir = DomainManager.Mod.GetModDirectory(ModIdStr);
+				if (!string.IsNullOrEmpty(modDir))
+				{
+					var pluginDir = Path.Combine(modDir, "Plugins", "Back");
+					var commonDir = Path.Combine(modDir, "Plugins", "CommonLib");
+					if (Directory.Exists(pluginDir))
+					{
+						AssemblyLoadContext.Default.Resolving += (context, assemblyName) =>
+						{
+							try
+							{
+								// 先搜 Back 目录，再搜 CommonLib 目录
+								var asmPath = Path.Combine(pluginDir, assemblyName.Name + ".dll");
+								if (File.Exists(asmPath))
+									return context.LoadFromAssemblyPath(asmPath);
+								if (Directory.Exists(commonDir))
+								{
+									asmPath = Path.Combine(commonDir, assemblyName.Name + ".dll");
+									if (File.Exists(asmPath))
+										return context.LoadFromAssemblyPath(asmPath);
+								}
+							}
+							catch (Exception ex)
+							{
+								Logger.Warn($"[AssemblyResolve] {assemblyName.Name} v{assemblyName.Version} 加载失败: {ex.Message}");
+							}
+							return null;
+						};
+						Logger.Info($"[InGameHelperBackend] AssemblyLoadContext 已注册，插件目录: {pluginDir}, commonDir: {commonDir}");
+					}
+				}
+			}
+			catch (Exception ex)
+			{
+				Logger.Warn($"[InGameHelperBackend] AssemblyLoadContext 初始化失败: {ex.Message}");
+			}
+
 			_harmony = Harmony.CreateAndPatchAll(typeof(InGameHelperBackendPlugin));
 			TryLoadConfig();
 			StartWatcher();
@@ -92,7 +140,7 @@ namespace InGameHelper
 			}
 			catch (Exception ex)
 			{
-				Logger.Error($"加载配置失败: {ex.Message}");
+				Logger.Info($"加载配置失败: {ex.Message}");
 			}
 		}
 
@@ -143,7 +191,7 @@ namespace InGameHelper
 			}
 			catch (Exception ex)
 			{
-				Logger.Error($"处理后端请求异常: {ex.Message}");
+				Logger.Info($"处理后端请求异常: {ex.Message}");
 			}
 		}
 
@@ -219,6 +267,9 @@ namespace InGameHelper
 					case "back_code":
 						resultData = ExecuteBackCode(request.RequestId, request.Params);
 						break;
+					case "back_cs":
+						resultData = ExecuteBackCs(request.Params);
+						break;
 					case "taiwu_info":
 						rawRoot = DomainManager.Taiwu;
 						resultData = BackendDataService.QueryTaiwuInfo();
@@ -276,7 +327,7 @@ namespace InGameHelper
 			}
 			catch (Exception ex)
 			{
-				Logger.Error($"[BackendBridge] 处理失败: {request.RequestId}, {ex.Message}");
+				Logger.Info($"[BackendBridge] 处理失败: {request.RequestId}, {ex.Message}");
 				return JsonConvert.SerializeObject(new BackendGameResponse
 				{
 					RequestId = request.RequestId,
@@ -363,6 +414,109 @@ namespace InGameHelper
 			}
 
 			return BackendJTokenConverter.ConvertToJToken(current, resultDepth);
+		}
+
+		/// <summary>在后端(.NET 8)动态执行C#代码。后端用 Script.Create + RunAsync(globals) 支持参数化复用。</summary>
+		private static readonly Dictionary<int, object> _backScriptCache = new Dictionary<int, object>();
+		private static readonly object _backScriptCacheLock = new object();
+		private static List<object> _backCachedRefsRaw;
+
+		private static JToken ExecuteBackCs(Dictionary<string, object> rawParams)
+		{
+			if (rawParams == null)
+				return new JObject { ["error"] = "params 不能为空" };
+
+			// 获取 code 或 codeFile
+			rawParams.TryGetValue("code", out var codeObj);
+			string code = codeObj?.ToString() ?? "";
+			rawParams.TryGetValue("codeFile", out var codeFileObj);
+			string codeFile = codeFileObj?.ToString() ?? "";
+
+			if (string.IsNullOrEmpty(code) && !string.IsNullOrEmpty(codeFile))
+			{
+				if (File.Exists(codeFile))
+					code = File.ReadAllText(codeFile);
+				else
+					return new JObject { ["error"] = $"codeFile 不存在: {codeFile}" };
+			}
+
+			if (string.IsNullOrEmpty(code))
+				return new JObject { ["error"] = "code 或 codeFile 不能为空" };
+
+			// 解析 resultDepth（默认 3）
+			int resultDepth = 3;
+			if (rawParams.TryGetValue("resultDepth", out var depthVal))
+			{
+				if (depthVal is long dl) resultDepth = (int)dl;
+				else if (depthVal is int di) resultDepth = di;
+			}
+
+			// 解析 globals 参数
+			Dictionary<string, object> globals = null;
+			if (rawParams.TryGetValue("globals", out var globalsObj) && globalsObj is Newtonsoft.Json.Linq.JObject globJObj)
+			{
+				globals = globJObj.ToObject<Dictionary<string, object>>();
+			}
+
+			try
+			{
+				// 缓存 MetadataReferences（避免每次遍历 AppDomain）
+				if (_backCachedRefsRaw == null)
+				{
+					var refs = new List<MetadataReference>();
+					foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+					{
+						try
+						{
+							if (!asm.IsDynamic && !string.IsNullOrEmpty(asm.Location))
+								refs.Add(MetadataReference.CreateFromFile(asm.Location));
+						}
+						catch { }
+					}
+					_backCachedRefsRaw = refs.Select(r => (object)r).ToList();
+				}
+				var asmReferences = _backCachedRefsRaw.Cast<MetadataReference>().ToList();
+
+				var scriptOptions = ScriptOptions.Default
+					.WithImports(
+						"System", "System.Collections.Generic", "System.Linq",
+						"System.Text", "System.IO", "System.Reflection",
+						"GameData.Domains", "Newtonsoft.Json", "Newtonsoft.Json.Linq",
+						"InGameHelper.Common"
+					)
+					.WithReferences(asmReferences);
+
+				// 后端：按 code 哈希缓存 Script 对象
+				// BackendCsGlobals 在独立程序集中，由 CommonLib 加载到 Default ALC，无类型冲突
+				var codeHash = code.GetHashCode();
+				Script<object> script;
+				lock (_backScriptCacheLock)
+				{
+					if (!_backScriptCache.TryGetValue(codeHash, out var cached))
+					{
+						script = CSharpScript.Create<object>(code, scriptOptions, typeof(InGameHelper.Common.BackendCsGlobals));
+						_backScriptCache[codeHash] = script;
+					}
+					else
+					{
+						script = (Script<object>)cached;
+					}
+				}
+
+				// 每次调用传入不同的 globals 实例，不重新编译
+				var globalsInstance = new InGameHelper.Common.BackendCsGlobals { Params = globals ?? new Dictionary<string, object>() };
+				var result = script.RunAsync(globalsInstance).GetAwaiter().GetResult().ReturnValue;
+
+				if (result == null)
+					return new JObject { ["success"] = true, ["resultType"] = "null" };
+
+				return BackendJTokenConverter.ConvertToJToken(result, resultDepth);
+			}
+			catch (Exception ex)
+			{
+				Logger.Info($"[ExecuteBackCs] 脚本执行失败: {ex.Message}");
+				return new JObject { ["error"] = $"脚本执行失败: {ex.Message}" };
+			}
 		}
 	}
 
