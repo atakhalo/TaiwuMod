@@ -38,6 +38,7 @@ namespace InGameHelper
 		private string _resultIndexPath;
 		private string _backendQuestPath;
 		private string _backendResultPath;
+		private bool _clearResult;
 
 		// FileSystemWatcher
 		private FileSystemWatcher _questWatcher;
@@ -131,7 +132,10 @@ namespace InGameHelper
 			_backendResultWatcher?.Dispose();
 		}
 
-		public override void OnModSettingUpdate() { }
+		public override void OnModSettingUpdate()
+		{
+			
+		}
 
 		// ===================== 配置加载 =====================
 
@@ -176,12 +180,64 @@ namespace InGameHelper
 				var backendResultFile = doc.Descendants("backendResult").FirstOrDefault()?.Value ?? "_backend_result.json";
 				_backendResultPath = Path.Combine(_workDir, backendResultFile);
 
+				// 读取 clearResult 配置
+				var clearResultRaw = doc.Descendants("clearResult").FirstOrDefault()?.Value ?? "false";
+				_clearResult = string.Equals(clearResultRaw, "true", StringComparison.OrdinalIgnoreCase);
+
 				MyUtils.MyLog($"配置: workDir={_workDir}, quest={_questPath}, result={_resultPath}");
 				MyUtils.MyLog($"配置: backendQuest={_backendQuestPath}, backendResult={_backendResultPath}");
+				MyUtils.MyLog($"配置: clearResult={_clearResult}");
+
+				// clearResult=true 时清理工作目录下的临时结果文件
+				if (_clearResult && !string.IsNullOrEmpty(_workDir))
+				{
+					CleanupResultFiles();
+				}
 			}
 			catch (Exception ex)
 			{
 				MyUtils.MyLog($"加载配置失败: {ex.Message}");
+			}
+		}
+
+		/// <summary>清理工作目录下的 result_*.json 临时结果文件和 result_index.json</summary>
+		private void CleanupResultFiles()
+		{
+			try
+			{
+				if (!Directory.Exists(_workDir)) return;
+
+				// 删除 result_xxx.json
+				foreach (var f in Directory.GetFiles(_workDir, "result_*.json"))
+				{
+					try
+					{
+						File.Delete(f);
+						// MyUtils.MyLog($"已删除临时结果文件: {Path.GetFileName(f)}");
+					}
+					catch (Exception ex)
+					{
+						// MyUtils.MyLog($"删除文件失败 {f}: {ex.Message}");
+					}
+				}
+
+				// 删除 result_index.json
+				if (File.Exists(_resultIndexPath))
+				{
+					try
+					{
+						File.Delete(_resultIndexPath);
+						// MyUtils.MyLog($"已删除结果索引: {_resultIndexPath}");
+					}
+					catch (Exception ex)
+					{
+						MyUtils.MyLog($"删除 result_index.json 失败: {ex.Message}");
+					}
+				}
+			}
+			catch (Exception ex)
+			{
+				MyUtils.MyLog($"清理结果文件异常: {ex.Message}");
 			}
 		}
 
