@@ -21,6 +21,8 @@ using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Scripting;
 using Microsoft.CodeAnalysis.Scripting;
 using System.Runtime.Loader;
+using System.Threading.Channels;
+using System.Threading.Tasks;
 
 namespace InGameHelper
 {
@@ -38,6 +40,8 @@ namespace InGameHelper
 		private string _backendQuestPath;
 		private string _backendResultPath;
 		private FileSystemWatcher _questWatcher;
+		private Channel<string> _questChannel;
+		private CancellationTokenSource _loopCts;
 
 		public override void Initialize()
 		{
@@ -85,14 +89,18 @@ namespace InGameHelper
 
 			_harmony = Harmony.CreateAndPatchAll(typeof(InGameHelperBackendPlugin));
 			TryLoadConfig();
+			_questChannel = Channel.CreateUnbounded<string>(new UnboundedChannelOptions { SingleReader = true });
+			_loopCts = new CancellationTokenSource();
+			Task.Run(() => ProcessLoopAsync(_loopCts.Token));
 			StartWatcher();
 		}
 
 		public override void Dispose()
 		{
 			Logger.Info("[InGameHelperBackend] Dispose");
-			_harmony?.UnpatchSelf();
+			_loopCts?.Cancel();
 			_questWatcher?.Dispose();
+			_harmony?.UnpatchSelf();
 		}
 
 		public override void OnModSettingUpdate() { }
@@ -180,18 +188,36 @@ namespace InGameHelper
 				catch { return; }
 				if (string.IsNullOrEmpty(json)) return;
 
-				Logger.Info($"收到后端请求");
+				Logger.Info($"收到后端请求，入队");
 
-				var resultJson = BackendBridge.ProcessRequest(json);
-				if (resultJson != null)
-				{
-					SafeWriteFile(_backendResultPath, resultJson);
-					Logger.Info($"后端结果已写入: {_backendResultPath}");
-				}
+				// 写入通道，由异步循环处理
+				_questChannel.Writer.TryWrite(json);
 			}
 			catch (Exception ex)
 			{
 				Logger.Info($"处理后端请求异常: {ex.Message}");
+			}
+		}
+
+		/// <summary>异步请求处理循环，不阻塞 FileSystemWatcher 线程</summary>
+		private async Task ProcessLoopAsync(CancellationToken ct)
+		{
+			Logger.Info("后端异步处理循环已启动");
+			await foreach (var json in _questChannel.Reader.ReadAllAsync(ct))
+			{
+				try
+				{
+					var resultJson = await BackendBridge.ProcessRequestAsync(json);
+					if (resultJson != null)
+					{
+						SafeWriteFile(_backendResultPath, resultJson);
+						Logger.Info($"后端结果已写入: {_backendResultPath}");
+					}
+				}
+				catch (Exception ex)
+				{
+					Logger.Info($"处理后端请求异常: {ex.Message}");
+				}
 			}
 		}
 
@@ -226,11 +252,14 @@ namespace InGameHelper
 	{
 		private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
 
-		/// <summary>
-		/// 处理游戏数据查询请求。
-		/// 由前端通过反射调用，接收请求JSON，返回响应JSON。
-		/// </summary>
+		/// <summary>同步处理请求（供反射桥接调用）</summary>
 		public static string ProcessRequest(string requestJson)
+		{
+			return ProcessRequestAsync(requestJson).GetAwaiter().GetResult();
+		}
+
+		/// <summary>异步处理请求（供异步循环调用）</summary>
+		public static async Task<string> ProcessRequestAsync(string requestJson)
 		{
 			BackendGameRequest request;
 			try { request = JsonConvert.DeserializeObject<BackendGameRequest>(requestJson); }
@@ -260,7 +289,7 @@ namespace InGameHelper
 			try
 			{
 				JToken resultData = null;
-				object rawRoot = null; // 供 attach 链使用的原始对象
+				object rawRoot = null;
 
 				switch (request.Type)
 				{
@@ -268,7 +297,7 @@ namespace InGameHelper
 						resultData = ExecuteBackCode(request.RequestId, request.Params);
 						break;
 					case "back_cs":
-						resultData = ExecuteBackCs(request.Params);
+						resultData = await ExecuteBackCs(request.Params);
 						break;
 					case "taiwu_info":
 						rawRoot = DomainManager.Taiwu;
@@ -297,18 +326,16 @@ namespace InGameHelper
 						});
 				}
 
-				// 统一处理 attach：在原始对象上执行附加链后重新序列化
+				// 统一处理 attach
 				if (resultData != null && rawRoot != null && request.Params != null
 					&& request.Params.TryGetValue("attach", out var attachVal) && attachVal is JArray attachArr && attachArr.Count > 0)
 				{
-					// 取最后一个 attach 项的 chain + resultDepth
 					var lastAttach = attachArr[attachArr.Count - 1];
 					var attachParams = lastAttach["params"] as JObject;
 					if (attachParams != null)
 					{
 						var attachChain = attachParams["chain"]?.ToObject<List<BackendChainStep>>();
 						int attachDepth = attachParams["resultDepth"]?.Value<int>() ?? 3;
-
 						if (attachChain != null && attachChain.Count > 0)
 						{
 							var attachResult = BackendChainExecutor.ExecuteToObject(rawRoot, attachChain);
@@ -416,12 +443,12 @@ namespace InGameHelper
 			return BackendJTokenConverter.ConvertToJToken(current, resultDepth);
 		}
 
-		/// <summary>在后端(.NET 8)动态执行C#代码。后端用 Script.Create + RunAsync(globals) 支持参数化复用。</summary>
+		/// <summary>在后端(.NET 8)动态执行C#代码。脚本内可用 await Task.Delay()。</summary>
 		private static readonly Dictionary<int, object> _backScriptCache = new Dictionary<int, object>();
 		private static readonly object _backScriptCacheLock = new object();
 		private static List<object> _backCachedRefsRaw;
 
-		private static JToken ExecuteBackCs(Dictionary<string, object> rawParams)
+		private static async Task<JToken> ExecuteBackCs(Dictionary<string, object> rawParams)
 		{
 			if (rawParams == null)
 				return new JObject { ["error"] = "params 不能为空" };
@@ -460,12 +487,9 @@ namespace InGameHelper
 
 			try
 			{
-				// 缓存 MetadataReferences（包含 CommonLib 的显式引用）
 				if (_backCachedRefsRaw == null)
 				{
 					var refs = new List<MetadataReference>();
-
-					// 显式添加 InGameHelperCommon.dll（从 CommonLib 目录）
 					try
 					{
 						var modDir = DomainManager.Mod.GetModDirectory("InGameHelperBackend");
@@ -478,11 +502,7 @@ namespace InGameHelper
 
 					foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
 					{
-						try
-						{
-							if (!asm.IsDynamic && !string.IsNullOrEmpty(asm.Location))
-								refs.Add(MetadataReference.CreateFromFile(asm.Location));
-						}
+						try { if (!asm.IsDynamic && !string.IsNullOrEmpty(asm.Location)) refs.Add(MetadataReference.CreateFromFile(asm.Location)); }
 						catch { }
 					}
 					_backCachedRefsRaw = refs.Select(r => (object)r).ToList();
@@ -498,8 +518,6 @@ namespace InGameHelper
 					)
 					.WithReferences(asmReferences);
 
-				// 后端：按 code 哈希缓存 Script 对象
-				// BackendCsGlobals 在独立程序集中，由 CommonLib 加载到 Default ALC，无类型冲突
 				var codeHash = code.GetHashCode();
 				Script<object> script;
 				lock (_backScriptCacheLock)
@@ -515,9 +533,8 @@ namespace InGameHelper
 					}
 				}
 
-				// 每次调用传入不同的 globals 实例，不重新编译
 				var globalsInstance = new InGameHelper.Common.BackendCsGlobals { Params = globals ?? new Dictionary<string, object>() };
-				var result = script.RunAsync(globalsInstance).GetAwaiter().GetResult().ReturnValue;
+				var result = (await script.RunAsync(globalsInstance)).ReturnValue;
 
 				if (result == null)
 					return new JObject { ["success"] = true, ["resultType"] = "null" };
