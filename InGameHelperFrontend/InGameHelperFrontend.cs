@@ -307,6 +307,7 @@ namespace InGameHelper
 				case "front_cs":
 				case "simulate_click":
 				case "shop_buy_filtered":
+				case "screenshot":
 						// 前端可直接获取的数据 → 主线程协程处理
 						lock (_pendingLock) { _pendingSceneJson = json; }
 						break;
@@ -610,6 +611,9 @@ namespace InGameHelper
 					break;
 				case "shop_buy_filtered":
 					resultData = ShopBuyFiltered(request.Params);
+					break;
+				case "screenshot":
+					resultData = TakeScreenshot(request.RequestId, request.Params);
 					break;
 				default:
 					MyUtils.MyLog($"未知请求类型: {request.Type}");
@@ -1102,6 +1106,42 @@ namespace InGameHelper
 			if (val is long lv) return (int)lv;
 			if (val is short sv) return sv;
 			return 1;
+		}
+
+		/// <summary>截图请求：保存全分辨率游戏截图到指定路径（path 参数必填）</summary>
+		private static JToken TakeScreenshot(string requestId, Dictionary<string, object> rawParams)
+		{
+			var savePath = rawParams.GetValueOrDefault<string>("path") ?? "";
+			if (string.IsNullOrEmpty(savePath))
+				return new JObject { ["error"] = "path 参数不能为空" };
+
+			try
+			{
+				var tex = ScreenCapture.CaptureScreenshotAsTexture();
+				var bytes = ImageConversion.EncodeToPNG(tex);
+				UnityEngine.Object.DestroyImmediate(tex);
+
+				// 确保目录存在
+				var dir = Path.GetDirectoryName(savePath);
+				if (!string.IsNullOrEmpty(dir))
+					Directory.CreateDirectory(dir);
+
+				File.WriteAllBytes(savePath, bytes);
+
+				return new JObject
+				{
+					["success"] = true,
+					["path"] = savePath.Replace("\\", "/"),
+					["width"] = tex.width,
+					["height"] = tex.height,
+					["size"] = bytes.Length
+				};
+			}
+			catch (Exception ex)
+			{
+				MyUtils.MyLog($"截图失败: {ex.Message}");
+				return new JObject { ["error"] = $"截图失败: {ex.Message}" };
+			}
 		}
 
 		// ===================== 文件工具 =====================
