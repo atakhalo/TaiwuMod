@@ -52,6 +52,9 @@ namespace InGameHelper
 		private string _pendingDataRequestId; // 正在等待的数据请求ID
 		private static string _commonLibDir; // 由 Initialize 缓存，供静态 ExecuteFrontCs 使用
 
+		// 协程并发控制
+		private bool _isProcessing;
+
 			public override void Initialize()
 		{
 			MyUtils.modName = nameof(InGameHelper);
@@ -353,31 +356,171 @@ namespace InGameHelper
 				string json = null;
 				lock (_pendingLock)
 				{
-					if (_pendingSceneJson != null)
+					if (_pendingSceneJson != null && !_isProcessing)
 					{
 						json = _pendingSceneJson;
 						_pendingSceneJson = null;
+						_isProcessing = true;
 					}
 				}
 				if (json == null) continue;
 
-				try
+				var request = JsonConvert.DeserializeObject<GameRequest>(json);
+				if (request == null) { _isProcessing = false; continue; }
+
+				if (request.Type == "front_cs")
 				{
-					ProcessSceneRequest(json);
+					// async: yield 让主线程处理 UI 事件
+					MyUtils.MyLog($"异步执行脚本: id={request.RequestId}");
+					yield return ProcessFrontCsCoroutine(request);
 				}
-				catch (Exception ex)
+				else
 				{
-					MyUtils.MyLog($"场景请求处理异常: {ex.Message}");
-					// 异常时也要写错误响应，避免外部超时
-					try
+					// sync: 在 try-catch 外处理
+					try { ProcessSceneRequest(json); }
+					catch (Exception ex)
 					{
-						var errReq = JsonConvert.DeserializeObject<GameRequest>(json);
-						if (errReq != null && !string.IsNullOrEmpty(errReq.RequestId))
-							WriteResponse(new GameResponse { RequestId = errReq.RequestId, Success = false, Error = ex.Message });
+						MyUtils.MyLog($"场景请求处理异常: {ex.Message}");
+						try
+						{
+							if (request != null && !string.IsNullOrEmpty(request.RequestId))
+								WriteResponse(new GameResponse { RequestId = request.RequestId, Success = false, Error = ex.Message });
+						}
+						catch { }
 					}
-					catch { }
+				}
+				_isProcessing = false;
+			}
+		}
+
+		/// <summary>异步执行 front_cs 脚本，协程 yield 不阻塞主线程</summary>
+		private IEnumerator ProcessFrontCsCoroutine(GameRequest request)
+		{
+			var sw = Stopwatch.StartNew();
+
+			// ---- 以下代码从 ExecuteFrontCs 同步部分复制 ----
+			if (request.Params == null)
+			{
+				WriteResponse(new GameResponse { RequestId = request.RequestId, Success = false, Error = "params 不能为空" });
+				yield break;
+			}
+
+			string code = request.Params.GetValueOrDefault<string>("code") ?? "";
+			string codeFile = request.Params.GetValueOrDefault<string>("codeFile") ?? "";
+
+			if (string.IsNullOrEmpty(code) && !string.IsNullOrEmpty(codeFile))
+			{
+				if (File.Exists(codeFile))
+					code = SafeReadAllText(codeFile);
+				else
+				{
+					WriteResponse(new GameResponse { RequestId = request.RequestId, Success = false, Error = $"codeFile 不存在: {codeFile}" });
+					yield break;
 				}
 			}
+
+			if (string.IsNullOrEmpty(code))
+			{
+				WriteResponse(new GameResponse { RequestId = request.RequestId, Success = false, Error = "code 或 codeFile 不能为空" });
+				yield break;
+			}
+
+			int resultDepth = 3;
+			if (request.Params.TryGetValue("resultDepth", out var depthVal))
+			{
+				if (depthVal is long dl) resultDepth = (int)dl;
+				else if (depthVal is int di) resultDepth = di;
+			}
+
+			Dictionary<string, object> globals = null;
+			if (request.Params.TryGetValue("globals", out var globalsObj) && globalsObj is JObject globJObj)
+			{
+				globals = globJObj.ToObject<Dictionary<string, object>>();
+			}
+
+			// 准备（无 yield 的部分可以 try-catch）
+			Script<object> script = null;
+			InGameHelper.Common.FrontendCsGlobals globalsInstance = null;
+			string setupError = null;
+
+			try
+			{
+				if (_frontCachedRefsRaw == null)
+				{
+					var refs = new List<MetadataReference>();
+					var commonPath = Path.Combine(_commonLibDir, "InGameHelperCommon.dll");
+					if (File.Exists(commonPath))
+						refs.Add(MetadataReference.CreateFromFile(commonPath));
+					foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+					{
+						try { if (!asm.IsDynamic && !string.IsNullOrEmpty(asm.Location)) refs.Add(MetadataReference.CreateFromFile(asm.Location)); }
+						catch { }
+					}
+					_frontCachedRefsRaw = refs.Select(r => (object)r).ToList();
+				}
+				var asmReferences = _frontCachedRefsRaw.Cast<MetadataReference>().ToList();
+
+				var scriptOptions = ScriptOptions.Default
+					.WithImports(
+						"System", "System.Collections.Generic", "System.Linq",
+						"System.Text", "System.IO", "System.Reflection",
+						"UnityEngine", "Newtonsoft.Json", "Newtonsoft.Json.Linq",
+						"InGameHelper.Common"
+					)
+					.WithReferences(asmReferences);
+
+				var codeHash = code.GetHashCode();
+				lock (_frontScriptCacheLock)
+				{
+					if (!_frontScriptCache.TryGetValue(codeHash, out var cached))
+					{
+						script = CSharpScript.Create<object>(code, scriptOptions, typeof(InGameHelper.Common.FrontendCsGlobals));
+						_frontScriptCache[codeHash] = script;
+					}
+					else
+					{
+						script = (Script<object>)cached;
+					}
+				}
+
+				globalsInstance = new InGameHelper.Common.FrontendCsGlobals { Params = globals ?? new Dictionary<string, object>() };
+			}
+			catch (Exception ex)
+			{
+				setupError = ex.InnerException?.Message ?? ex.Message;
+			}
+
+			if (setupError != null)
+			{
+				MyUtils.MyLog($"[ProcessFrontCsCoroutine] 准备失败: {setupError}");
+				WriteResponse(new GameResponse { RequestId = request.RequestId, Success = false, Error = setupError });
+				yield break;
+			}
+
+			// 异步执行（不能放 try-catch 里）
+			var task = script.RunAsync(globalsInstance);
+			while (!task.IsCompleted) yield return null;
+
+			// 处理结果
+			JToken resultData;
+			if (task.IsFaulted)
+			{
+				var ex = task.Exception?.InnerException ?? task.Exception;
+				MyUtils.MyLog($"[ProcessFrontCsCoroutine] 脚本执行失败: {ex?.Message}");
+				resultData = new JObject { ["error"] = $"脚本执行失败: {ex?.Message}" };
+			}
+			else
+			{
+				var result = task.Result.ReturnValue;
+				if (result == null)
+					resultData = new JObject { ["success"] = true, ["resultType"] = "null" };
+				else
+					resultData = JTokenConverter.ConvertToJToken(result, resultDepth);
+			}
+
+			sw.Stop();
+			MyUtils.MyLog($"脚本异步执行完成: {request.RequestId}, {sw.ElapsedMilliseconds}ms");
+			WriteResponse(new GameResponse { RequestId = request.RequestId, Success = !task.IsFaulted, Data = resultData });
 		}
 
 		private void ProcessSceneRequest(string json)
@@ -406,14 +549,14 @@ namespace InGameHelper
 				case "front_code":
 					resultData = ExecuteFrontCode(request.RequestId, request.Params);
 					break;
-				case "front_cs":
-					resultData = ExecuteFrontCs(request.Params);
-					break;
 				case "simulate_click":
 					resultData = SimulateClick(request.Params);
 					break;
 				case "shop_buy_filtered":
 					resultData = ShopBuyFiltered(request.Params);
+					break;
+				default:
+					MyUtils.MyLog($"未知请求类型: {request.Type}");
 					break;
 			}
 
@@ -585,110 +728,12 @@ namespace InGameHelper
 			return JTokenConverter.ConvertToJToken(current, resultDepth);
 		}
 
-		/// <summary>在前端(Unity)动态执行C#代码。参数化复用模式，与后端一致。</summary>
+		// 脚本缓存（供 ProcessFrontCsCoroutine 使用）
 		private static readonly Dictionary<int, object> _frontScriptCache = new Dictionary<int, object>();
 		private static readonly object _frontScriptCacheLock = new object();
 		private static List<object> _frontCachedRefsRaw;
 
-		private static JToken ExecuteFrontCs(Dictionary<string, object> rawParams)
-		{
-			if (rawParams == null)
-				return new JObject { ["error"] = "params 不能为空" };
-
-			// 获取 code 或 codeFile
-			string code = rawParams.GetValueOrDefault<string>("code") ?? "";
-			string codeFile = rawParams.GetValueOrDefault<string>("codeFile") ?? "";
-
-			if (string.IsNullOrEmpty(code) && !string.IsNullOrEmpty(codeFile))
-			{
-				if (File.Exists(codeFile))
-					code = SafeReadAllText(codeFile);
-				else
-					return new JObject { ["error"] = $"codeFile 不存在: {codeFile}" };
-			}
-
-			if (string.IsNullOrEmpty(code))
-				return new JObject { ["error"] = "code 或 codeFile 不能为空" };
-
-			// 解析 resultDepth（默认 3）
-			int resultDepth = 3;
-			if (rawParams.TryGetValue("resultDepth", out var depthVal))
-			{
-				if (depthVal is long dl) resultDepth = (int)dl;
-				else if (depthVal is int di) resultDepth = di;
-			}
-
-			// 解析 globals 参数
-			Dictionary<string, object> globals = null;
-			if (rawParams.TryGetValue("globals", out var globalsObj) && globalsObj is Newtonsoft.Json.Linq.JObject globJObj)
-			{
-				globals = globJObj.ToObject<Dictionary<string, object>>();
-			}
-
-			try
-			{
-				// 缓存 MetadataReferences（包含 CommonLib 的显式引用）
-				if (_frontCachedRefsRaw == null)
-				{
-					var refs = new List<MetadataReference>();
-
-					// 显式添加 InGameHelperCommon.dll（从 CommonLib 目录，Assembly.Load 后 Location 为空）
-					var commonPath = Path.Combine(_commonLibDir, "InGameHelperCommon.dll");
-					if (File.Exists(commonPath))
-						refs.Add(MetadataReference.CreateFromFile(commonPath));
-
-					foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
-					{
-						try
-						{
-							if (!asm.IsDynamic && !string.IsNullOrEmpty(asm.Location))
-								refs.Add(MetadataReference.CreateFromFile(asm.Location));
-						}
-						catch { }
-					}
-					_frontCachedRefsRaw = refs.Select(r => (object)r).ToList();
-				}
-				var asmReferences = _frontCachedRefsRaw.Cast<MetadataReference>().ToList();
-
-				var scriptOptions = ScriptOptions.Default
-					.WithImports(
-						"System", "System.Collections.Generic", "System.Linq",
-						"System.Text", "System.IO", "System.Reflection",
-						"UnityEngine", "Newtonsoft.Json", "Newtonsoft.Json.Linq",
-						"InGameHelper.Common"
-					)
-					.WithReferences(asmReferences);
-
-				// 按 code 哈希缓存 Script 对象，globals 类型为 FrontendCsGlobals
-				var codeHash = code.GetHashCode();
-				Script<object> script;
-				lock (_frontScriptCacheLock)
-				{
-					if (!_frontScriptCache.TryGetValue(codeHash, out var cached))
-					{
-						script = CSharpScript.Create<object>(code, scriptOptions, typeof(InGameHelper.Common.FrontendCsGlobals));
-						_frontScriptCache[codeHash] = script;
-					}
-					else
-					{
-						script = (Script<object>)cached;
-					}
-				}
-
-				var globalsInstance = new InGameHelper.Common.FrontendCsGlobals { Params = globals ?? new Dictionary<string, object>() };
-				var result = script.RunAsync(globalsInstance).GetAwaiter().GetResult().ReturnValue;
-
-				if (result == null)
-					return new JObject { ["success"] = true, ["resultType"] = "null" };
-
-				return JTokenConverter.ConvertToJToken(result, resultDepth);
-			}
-			catch (Exception ex)
-			{
-				MyUtils.MyLog($"[ExecuteFrontCs] 脚本执行失败: {ex.Message}");
-				return new JObject { ["error"] = $"脚本执行失败: {ex.Message}" };
-			}
-		}
+		/// <summary>在前端(Unity)动态执行C#代码。已废弃，由 ProcessFrontCsCoroutine 替代。</summary>
 
 		/// <summary>模拟指针点击，通过 EventSystem 触发 IPointerClickHandler</summary>
 		private static JToken SimulateClick(Dictionary<string, object> rawParams)

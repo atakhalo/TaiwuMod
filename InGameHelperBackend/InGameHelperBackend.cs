@@ -526,8 +526,9 @@ namespace InGameHelper
 			}
 			catch (Exception ex)
 			{
-				Logger.Info($"[ExecuteBackCs] 脚本执行失败: {ex.Message}");
-				return new JObject { ["error"] = $"脚本执行失败: {ex.Message}" };
+				var msg = ex.InnerException?.Message ?? ex.Message;
+				Logger.Info($"[ExecuteBackCs] 脚本执行失败: {msg}");
+				return new JObject { ["error"] = $"脚本执行失败: {msg}" };
 			}
 		}
 	}
