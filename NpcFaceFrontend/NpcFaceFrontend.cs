@@ -1159,6 +1159,8 @@ namespace NpcFace
 			{
 				var config = LoadSpineConfig(dir, fileName, avatarAssetName);
 				GetSpinePath(config, out string skelPath, out string atlasPath);
+				if(skelPath == "" && atlasPath == "") // 如果都没有，就是静态图片
+					return false;
 				// MyUtils.MyLog($"TrySpine 读取到21 {dir}, {fileName}");
 				// MyUtils.MyLog($"TrySpine 读取到22 {skelPath}");
 				// MyUtils.MyLog($"TrySpine 读取到23 {atlasPath}");
