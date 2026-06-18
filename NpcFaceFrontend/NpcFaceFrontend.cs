@@ -270,12 +270,15 @@ namespace NpcFace
 
 		public class SpineConfig
 		{
-			public string fileDir;
+			public string fileDir; // 用来找 skel， altas，png， 默认是 tag 路径/Spine/fileName
+			public string skelName;
+
 			public string fileName;
 			public string keyName;
 			public List<string> altas;
 			public string skinName;
 			public string animName;
+			public Dictionary<string, string> attachments;
 			public float scaleBig = 1.0f;
 			public float scaleNormal = 0.5f;
 			public float scaleSmall = 1.0f;
@@ -285,6 +288,7 @@ namespace NpcFace
 			public float noramlOffsetY = 0f;
 			public float smallOffsetX = 0f;
 			public float smallOffsetY = 0f;
+
 
 		}
 		// spine 配置缓存； 设置变化的是否清零；
@@ -1197,6 +1201,21 @@ namespace NpcFace
 								.Select(e => e.Value)
 								.ToList();
 
+			// MyUtils.MyLog("try load fileDir");
+
+			var fileDir = doc.Descendants("fileDir").FirstOrDefault()?.Value ?? "";
+			if(fileDir != "")
+			{
+				if(Path.IsPathRooted(fileDir))
+					sc.fileDir = fileDir;
+				else
+					sc.fileDir = Path.Combine(dir, "Spine", fileName, fileDir);
+				// MyUtils.MyLog($"try load fileDir {fileDir} -> {sc.fileDir}");
+			}
+			sc.skelName = doc.Descendants("skelName").FirstOrDefault()?.Value ?? "";
+			if(sc.skelName == "") sc.skelName = sc.fileName ;
+			// MyUtils.MyLog($"try get skelName {sc.skelName}");
+
 			sc.skinName = doc.Descendants("skin").FirstOrDefault()?.Value ?? "";
 			sc.animName = doc.Descendants("anim").FirstOrDefault()?.Value ?? "";
 			sc.scaleBig = float.Parse(doc.Descendants("scaleBig").FirstOrDefault()?.Value ?? "1");
@@ -1208,32 +1227,40 @@ namespace NpcFace
 			sc.noramlOffsetY = float.Parse(doc.Descendants("noramlOffsetY").FirstOrDefault()?.Value ?? "0");
 			sc.smallOffsetX = float.Parse(doc.Descendants("smallOffsetX").FirstOrDefault()?.Value ?? "0");
 			sc.smallOffsetY = float.Parse(doc.Descendants("smallOffsetY").FirstOrDefault()?.Value ?? "0");
+
+			sc.attachments = doc.Descendants("attachments")
+				.Elements("item")
+				.Where(e => e.Element("slot") != null && e.Element("attach") != null)
+				.ToDictionary(
+					e => e.Element("slot").Value,
+					e => e.Element("attach").Value
+				);
 			return sc;
 		}
 
 		private static void GetSpinePath(SpineConfig spineConfig, out string skel, out string altasTxt)
 		{
 			// 加载skel， 可能是 .json 后缀， .skel 后缀，或者 .skel.bytes 后缀
-			var skel1 = Path.Combine(spineConfig.fileDir, spineConfig.fileName + ".json");
+			var skel1 = Path.Combine(spineConfig.fileDir, spineConfig.skelName + ".json");
 			if (File.Exists(skel1)) { skel = skel1; }
 			else 
 			{
-				skel1 = Path.Combine(spineConfig.fileDir, spineConfig.fileName + ".skel.bytes");
+				skel1 = Path.Combine(spineConfig.fileDir, spineConfig.skelName + ".skel.bytes");
 				if (File.Exists(skel1)) { skel = skel1;  }
 				else
 				{
-					skel1 = Path.Combine(spineConfig.fileDir, spineConfig.fileName + ".skel");
+					skel1 = Path.Combine(spineConfig.fileDir, spineConfig.skelName + ".skel");
 					if (File.Exists(skel1)) { skel = skel1; }
 					else skel = "";
 				}
 			}
 
 			// 加载 altasTxt, 可能是 .atlas 后缀，或者 .atlas.txt 后缀
-			var altasTxt1 = Path.Combine(spineConfig.fileDir, spineConfig.fileName + ".atlas.txt");
+			var altasTxt1 = Path.Combine(spineConfig.fileDir, spineConfig.skelName + ".atlas.txt");
 			if (File.Exists(altasTxt1)) { altasTxt = altasTxt1; }
 			else
 			{
-				altasTxt1 = Path.Combine(spineConfig.fileDir, spineConfig.fileName + ".atlas");
+				altasTxt1 = Path.Combine(spineConfig.fileDir, spineConfig.skelName + ".atlas");
 				if (File.Exists(altasTxt1)) { altasTxt = altasTxt1; }
 				else altasTxt = "";
 			}
@@ -1241,10 +1268,10 @@ namespace NpcFace
 			if(spineConfig.altas.Count == 0)
 			{
 				// 加载 altasPng, .png 后缀
-				var altasPng1 = Path.Combine(spineConfig.fileDir, spineConfig.fileName + ".png");
+				var altasPng1 = Path.Combine(spineConfig.fileDir, spineConfig.skelName + ".png");
 				if (File.Exists(altasPng1)) 
 				{
-					spineConfig.altas.Add(spineConfig.fileName);
+					spineConfig.altas.Add(spineConfig.skelName);
 				}
 			}
 		}
@@ -1303,6 +1330,7 @@ namespace NpcFace
 			{
 				var item = spineConfig.altas[i];
 				var pngPath = Path.Combine(spineConfig.fileDir, item + ".png");
+				// MyUtils.MyLog($"加载图集 {pngPath}");
 				byte[] pngBytes = File.ReadAllBytes(pngPath);
 				Texture2D texture = new Texture2D(1, 1);
 				texture.LoadImage(pngBytes);
@@ -1400,6 +1428,8 @@ namespace NpcFace
 				npcSkeleton.transform.localScale = Vector3.one * spineScale;
 				if(!npcSkeleton.gameObject.activeSelf)
 					npcSkeleton.gameObject.SetActive(true);
+				// 应用附件
+				// ApplySpineAttachments(npcSkeleton, spineConfig);
 				// 应用偏移（使用 Traverse 调用私有方法）
 				var o = GetSpineOffset(spineConfig, avatar.Size);
 				Traverse.Create(avatar).Method("ApplyAvatarOffset", o).GetValue();
@@ -1430,6 +1460,9 @@ namespace NpcFace
 						npcSkeleton.AnimationState.SetAnimation(0, npcSkeleton.startingAnimation, true);
 				}
 
+				// 应用附件
+				ApplySpineAttachments(npcSkeleton, spineConfig);
+
 				// 设置缩放和激活
 				npcSkeleton.transform.localScale = Vector3.one * GetSpineScale(spineConfig, avatar.Size);
 				npcSkeleton.gameObject.SetActive(true);
@@ -1447,6 +1480,44 @@ namespace NpcFace
 
 			// MyUtils.MyLog("TryApplySpineAsset: success");
 			return true;
+		}
+
+		/// <summary>
+		/// 应用附件：先重置到默认皮肤，再遍历 spineConfig.attachments 调用 SetAttachment
+		/// </summary>
+		private static void ApplySpineAttachments(SkeletonGraphic npcSkeleton, SpineConfig spineConfig)
+		{
+			if (spineConfig.attachments == null || spineConfig.attachments.Count == 0) return;
+			if (npcSkeleton.Skeleton == null) return;
+
+			var skeleton = npcSkeleton.Skeleton;
+
+			// // 先重置到默认皮肤，清除旧的附件覆盖（关键：切换蛐蛐时防止残留）
+			// skeleton.SetSkin(skeleton.Data.DefaultSkin);
+			// skeleton.SetSlotsToSetupPose();
+
+			foreach (var kv in spineConfig.attachments)
+			{
+				var slotName = kv.Key;
+				var attachName = kv.Value;
+				try
+				{
+					if (string.IsNullOrEmpty(attachName))
+					{
+						// 空字符串 = 隐藏该槽位（用于可选槽无匹配时）
+						var slot = skeleton.FindSlot(slotName);
+						if (slot != null) slot.A = 0f;
+					}
+					else
+					{
+						skeleton.SetAttachment(slotName, attachName);
+					}
+				}
+				catch (Exception ex)
+				{
+					MyUtils.MyLog($"SetAttachment failed slot={slotName} attach={attachName}: {ex.Message}");
+				}
+			}
 		}
 
 		/// <summary>
