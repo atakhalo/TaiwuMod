@@ -5,7 +5,7 @@
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
     <AssemblyName>UabHooker</AssemblyName>
-    <OutputPath>C:\Program Files (x86)\Steam\steamapps\common\The Scroll Of Taiwu\Mod\Uab替换\Plugins\</OutputPath>
+    <OutputPath>C:\Program Files (x86)\Steam\steamapps\common\The Scroll Of Taiwu\Mod\资源替换\Plugins\</OutputPath>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
   </PropertyGroup>
 
