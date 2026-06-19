@@ -10,6 +10,7 @@ using System.Reflection;
 using System.Xml.Linq;
 using TaiwuModdingLib.Core.Plugin;
 using UnityEngine;
+using UnityEngine.U2D;
 using Spine.Unity;
 using UnityEngine.UI;
 
@@ -24,12 +25,14 @@ namespace UabHooker
         private static Dictionary<string, string> _replaceUab = new Dictionary<string, string>(); // uab名 → 替换文件
         private static Dictionary<string, Dictionary<string, string>> _replaceImg = new Dictionary<string, Dictionary<string, string>>(); // bundle名 → { assetPath → 文件 }
         private static Dictionary<string, Dictionary<string, string>> _replaceSpineImg = new Dictionary<string, Dictionary<string, string>>(); // skel名称 → { 纹理名 → 文件 }
+        private static Dictionary<string, Dictionary<string, string>> _replaceAtlas = new Dictionary<string, Dictionary<string, string>>(); // 图集名 → { 精灵名 → png文件 }
 
         // ← 日志开关
         private static bool logReplace = true;
         private static bool logEntryUab = false;
         private static bool logEntryImg = false;
         private static bool logEntrySpineImg = false;
+        private static bool logEntryAtlas = false;
 
         public override void Initialize()
         {
@@ -41,7 +44,7 @@ namespace UabHooker
 
             harmony = Harmony.CreateAndPatchAll(typeof(UabHookerFrontendPlugin));
 
-            MyUtils.MyLog($"初始化完成: Uab={_replaceUab.Count}, Img={_replaceImg.Sum(kv=>kv.Value.Count)}, SpineImg={_replaceSpineImg.Sum(kv=>kv.Value.Count)}");
+            MyUtils.MyLog($"初始化完成: Uab={_replaceUab.Count}, Img={_replaceImg.Sum(kv=>kv.Value.Count)}, SpineImg={_replaceSpineImg.Sum(kv=>kv.Value.Count)}, Atlas={_replaceAtlas.Count}");
         }
 
         // ═══════════════════════════════════════════════════════════════
@@ -143,6 +146,30 @@ namespace UabHooker
                     }
                 }
             }
+
+            // HookAtlas: 图集精灵替换（替换 SpriteAtlas.GetSprite 返回的精灵）
+            foreach (var hook in root.Elements("HookAtlas"))
+            {
+                foreach (var atlas in hook.Elements("atlas"))
+                {
+                    string atlasName = (string)atlas.Attribute("name") ?? "";
+                    bool atlasEnable = (bool?)atlas.Attribute("enable") ?? true;
+                    if (!atlasEnable || string.IsNullOrEmpty(atlasName)) continue;
+
+                    if (!_replaceAtlas.TryGetValue(atlasName, out var map))
+                        _replaceAtlas[atlasName] = map = new Dictionary<string, string>();
+
+                    foreach (var sprite in atlas.Elements("sprite"))
+                    {
+                        string spriteName = (string)sprite.Attribute("name") ?? "";
+                        string to = ResolveToPath((string)sprite.Attribute("to") ?? "", baseDir);
+                        bool spriteEnable = (bool?)sprite.Attribute("enable") ?? true;
+                        if (!spriteEnable || string.IsNullOrEmpty(spriteName) || string.IsNullOrEmpty(to)) continue;
+                        map[spriteName] = to;
+                        MyUtils.MyLog($"配置[HookAtlas] [{atlasName}] {spriteName} -> {to}");
+                    }
+                }
+            }
         }
 
         public override void Dispose() { harmony?.UnpatchSelf(); }
@@ -152,6 +179,7 @@ namespace UabHooker
             ModManager.GetSetting(ModIdStr, "logEntryUab", ref logEntryUab);
             ModManager.GetSetting(ModIdStr, "logEntryImg", ref logEntryImg);
             ModManager.GetSetting(ModIdStr, "logEntrySpineImg", ref logEntrySpineImg);
+            ModManager.GetSetting(ModIdStr, "logEntryAtlas", ref logEntryAtlas);
         }
 
         // ═══════════════════════════════════════════════════════════════
@@ -184,8 +212,12 @@ namespace UabHooker
         public static bool ResourcePackage_Pre(Type type, List<string> dependenceList, string assetPath, string assetName,
             ref ValueTuple<FrameWork.AssetBundlePackage.ResourcePackage, string, UnityEngine.Object> __result)
         {
-            if (_replaceImg.Count == 0) { if (logEntryImg && !string.IsNullOrEmpty(assetPath)) MyUtils.MyLog("[HookImg] 入口: assetPath=" + assetPath); return true; }
-            if (logEntryImg && !string.IsNullOrEmpty(assetPath)) MyUtils.MyLog("[HookImg] 入口: assetPath=" + assetPath + " assetName=" + assetName);
+            if (_replaceImg.Count == 0) { if (logEntryImg && !string.IsNullOrEmpty(assetPath)) MyUtils.MyLog("[HookImg] 入口: assetPath=" + assetPath + " type=" + type?.Name); return true; }
+            if (logEntryImg) MyUtils.MyLog("[HookImg] 入口: assetPath=" + (assetPath ?? assetName) + " type=" + type?.Name);
+
+            // 只替换我们支持的资源类型，其他类型放行
+            if (type != typeof(Texture2D) && type != typeof(Sprite) && type != typeof(TextAsset) && type != null)
+                return true;
 
             // 尝试匹配完整 assetPath
             if (!string.IsNullOrEmpty(assetPath))
@@ -285,6 +317,31 @@ namespace UabHooker
 					}
 				}
 			}
+        }
+
+        [HarmonyPrefix]
+        [HarmonyPatch(typeof(SpriteAtlas), "GetSprite", new Type[] { typeof(string) })]
+        public static bool SpriteAtlas_GetSprite_Pre(SpriteAtlas __instance, string name, ref Sprite __result)
+        {
+            if (_replaceAtlas.Count == 0) return true;
+            string atlasName = __instance.name;
+            if (logEntryAtlas) MyUtils.MyLog("[HookAtlas] 入口: atlas=" + atlasName + " sprite=" + name);
+
+            if (_replaceAtlas.TryGetValue(atlasName, out var sprites) && sprites.TryGetValue(name, out string pngFile))
+            {
+                if (!File.Exists(pngFile)) { if (logReplace) MyUtils.MyLog("[HookAtlas] 文件不存在: " + pngFile); return true; }
+                Texture2D tex = new Texture2D(2, 2);
+                byte[] bytes = File.ReadAllBytes(pngFile);
+                if (tex.LoadImage(bytes))
+                {
+                    var sprite = Sprite.Create(tex, new Rect(0, 0, tex.width, tex.height), new Vector2(0.5f, 0.5f));
+                    sprite.name = name;
+                    __result = sprite;
+                    if (logReplace) MyUtils.MyLog("[HookAtlas] 替换: [" + atlasName + "] " + name + " -> " + pngFile);
+                    return false;
+                }
+            }
+            return true;
         }
 
         private static UnityEngine.Object LoadRep(string f, Type t)
