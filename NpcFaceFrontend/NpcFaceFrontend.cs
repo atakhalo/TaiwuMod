@@ -200,8 +200,8 @@ namespace NpcFace
             "NpcFace_yingjiao",//迎娇
             "NpcFace_wanquzhimin", // 螺舟
             "NpcFace_wudangya", // 武当鸭
-            "NpcFace_wuhushanghui",// 五湖商人
-            "NpcFace_wenshanshuhaige",// 文山书海商人
+            "NpcFace_wuhushanghuizongbu",// 五湖商人
+            "NpcFace_wenshanshuhaigezongbu",// 文山书海商人
             "NpcFace_yiyihou",// 衣以侯
             "NpcFace_xiaoyiyihou_happy", // 衣以侯笑脸
             "NpcFace_monv",// 莫女
@@ -1278,6 +1278,12 @@ namespace NpcFace
 
 		private static bool TrySpineBuiltIn(TaiwuAvatar avatar, CharacterAvatar? instance, string avatarAssetName)
 		{
+			var n = avatarAssetName.Split('$');
+			if(n.Length > 1)
+			{
+				avatar.RefreshAsSpine($"NpcFace/{n[1]}", "");
+				return true;
+			}
 			// 走原加载逻辑
 			if (ImgTemplate.TryGetValue(avatarAssetName, out int characterTemplateId))
 			{
@@ -1286,6 +1292,7 @@ namespace NpcFace
 				string skinName = config.FixedAvatarSpineSkin;
 				if (!string.IsNullOrEmpty(spineName))
 				{
+					// MyUtils.MyLog($"TrySpineBuiltIn {spineName}");
 					avatar.RefreshAsSpine(spineName, skinName);
 					return true;
 				}
@@ -1632,7 +1639,8 @@ namespace NpcFace
             else
             {
                 string sizeFolder = CharacterAvatar.GetAvatarSizeFolder(avatarSize);
-                string resPath1 = CharacterAvatar.GetNpcFaceResPath(sizeFolder, avatarAssetName);
+				var n = avatarAssetName.Split("$"); // 处理立绘跟动态立绘 用$分割
+				string resPath1 = CharacterAvatar.GetNpcFaceResPath(sizeFolder, n[0]);
                 resPath = resPath1; 
                 return false;
             }
