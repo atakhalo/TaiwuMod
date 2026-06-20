@@ -21,23 +21,64 @@ namespace UabHooker
     {
         private Harmony harmony;
 
-        // ← 替换规则
-        private static Dictionary<string, string> _replaceUab = new Dictionary<string, string>(); // uab名 → 替换文件
-        private static Dictionary<string, Dictionary<string, string>> _replaceImg = new Dictionary<string, Dictionary<string, string>>(); // bundle名 → { assetPath → 文件 }
-        private static Dictionary<string, Dictionary<string, string>> _replaceSpineImg = new Dictionary<string, Dictionary<string, string>>(); // skel名称 → { 纹理名 → 文件 }
+        // ← 替换规则（源数据，含 enable 条件）
+        private static Dictionary<string, FileReplaceInfo> _replaceUab = new Dictionary<string, FileReplaceInfo>();
+        private static Dictionary<string, Dictionary<string, FileReplaceInfo>> _replaceImg = new Dictionary<string, Dictionary<string, FileReplaceInfo>>();
+        private static Dictionary<string, Dictionary<string, FileReplaceInfo>> _replaceSpineImg = new Dictionary<string, Dictionary<string, FileReplaceInfo>>();
 
-        // ← 精灵替换信息（含可选的 w/h 尺寸）
-        private class SpriteReplaceInfo
+        // ← 运行时有效替换（按 enable 条件过滤后的快照）
+        private static Dictionary<string, FileReplaceInfo> _activeUab = new Dictionary<string, FileReplaceInfo>();
+        private static Dictionary<string, Dictionary<string, FileReplaceInfo>> _activeImg = new Dictionary<string, Dictionary<string, FileReplaceInfo>>();
+        private static Dictionary<string, Dictionary<string, FileReplaceInfo>> _activeSpineImg = new Dictionary<string, Dictionary<string, FileReplaceInfo>>();
+        private static Dictionary<string, Dictionary<string, List<SpriteReplaceInfo>>> _activeAtlas = new Dictionary<string, Dictionary<string, List<SpriteReplaceInfo>>>(); // 运行时有效快照
+
+        // ← 图集精灵源数据（含 enable 条件）
+        private static Dictionary<string, Dictionary<string, List<SpriteReplaceInfo>>> _sourceAtlas = new Dictionary<string, Dictionary<string, List<SpriteReplaceInfo>>>();
+
+        // ← 启用条件评估
+        private class EnableCondition
+        {
+            public enum CondType { Static, Dropdown, Toggle }
+            public CondType type = CondType.Static;
+            public bool staticValue = true;
+            public string modIdStr = "";
+            public string key = "";
+            public int idx = 0;
+
+            public bool IsEnabled()
+            {
+                switch (type)
+                {
+                    case CondType.Static: return staticValue;
+                    case CondType.Toggle:
+                        bool boolVal = false;
+                        ModManager.GetSetting(modIdStr, key, ref boolVal);
+                        return boolVal;
+                    case CondType.Dropdown:
+                        int intVal = 0;
+                        ModManager.GetSetting(modIdStr, key, ref intVal);
+                        return intVal == idx;
+                }
+                return true;
+            }
+        }
+
+        // ← 通用文件替换信息
+        private class FileReplaceInfo
         {
             public string filePath = "";
+            public EnableCondition enableCond = new EnableCondition();
+        }
+
+        // ← 精灵替换信息（含可选的 w/h 尺寸、坐标）
+        private class SpriteReplaceInfo : FileReplaceInfo
+        {
             public int w = -1; // -1 表示不指定，使用原始尺寸
             public int h = -1;
             public bool hasPos = false; // 是否指定了 posx/posy
             public float posX = 0;
             public float posY = 0;
         }
-        private static Dictionary<string, Dictionary<string, SpriteReplaceInfo>> _replaceAtlas = new Dictionary<string, Dictionary<string, SpriteReplaceInfo>>(); // 图集名 → { 精灵名 → 替换信息 }
-
         // ← 贴图缓存（文件路径 → Texture2D）
         private static Dictionary<string, Texture2D> _texCache = new Dictionary<string, Texture2D>();
 
@@ -58,7 +99,10 @@ namespace UabHooker
 
             harmony = Harmony.CreateAndPatchAll(typeof(UabHookerFrontendPlugin));
 
-            MyUtils.MyLog($"初始化完成: Uab={_replaceUab.Count}, Img={_replaceImg.Sum(kv=>kv.Value.Count)}, SpineImg={_replaceSpineImg.Sum(kv=>kv.Value.Count)}, Atlas={_replaceAtlas.Count}");
+            MyUtils.MyLog($"初始化完成: Uab={_replaceUab.Count}, Img={_replaceImg.Sum(kv=>kv.Value.Count)}, SpineImg={_replaceSpineImg.Sum(kv=>kv.Value.Count)}, Atlas={_sourceAtlas.Count}");
+
+            // 延迟一帧刷新有效条目，等所有 mod 设置还原完成
+            GameApp.Instance.StartCoroutine(DelayedRebuild());
         }
 
         // ═══════════════════════════════════════════════════════════════
@@ -70,10 +114,50 @@ namespace UabHooker
             foreach (var mod in ModManager.EnabledMods)
             {
                 var modInfo = ModManager.GetModInfo(mod);
+                if (modInfo == null) continue;
                 string configPath = Path.Combine(modInfo.DirectoryName, "uabhook.xml");
                 if (!File.Exists(configPath)) continue;
-                ParseConfig(configPath, modInfo.DirectoryName);
+                string modIdStr = mod.ToString();
+                _watchedModIdStrs.Add(modIdStr); // 记录关注的 mod
+                ParseConfig(configPath, modInfo.DirectoryName, modIdStr);
             }
+        }
+
+        private static EnableCondition ParseEnableCondition(string raw, string modIdStr)
+        {
+            var cond = new EnableCondition();
+            if (string.IsNullOrEmpty(raw))
+            {
+                cond.staticValue = true;
+                return cond;
+            }
+            if (raw.StartsWith("Dropdown:"))
+            {
+                var parts = raw.Split(':');
+                if (parts.Length >= 3 && int.TryParse(parts[2], out int idx))
+                {
+                    cond.type = EnableCondition.CondType.Dropdown;
+                    cond.modIdStr = modIdStr;
+                    cond.key = parts[1];
+                    cond.idx = idx;
+                    return cond;
+                }
+            }
+            else if (raw.StartsWith("Toggle:"))
+            {
+                var toggles = raw.Split(':');
+                if (toggles.Length >= 2)
+                {
+                    cond.type = EnableCondition.CondType.Toggle;
+                    cond.modIdStr = modIdStr;
+                    cond.key = toggles[1];
+                    return cond;
+                }
+            }
+            // 静态 bool
+            if (bool.TryParse(raw, out bool b))
+                cond.staticValue = b;
+            return cond;
         }
 
         private static string ResolveToPath(string to, string baseDir)
@@ -82,7 +166,7 @@ namespace UabHooker
             return Path.GetFullPath(Path.Combine(baseDir, to));
         }
 
-        public void ParseConfig(string configPath, string baseDir)
+        public void ParseConfig(string configPath, string baseDir, string modIdStr)
         {
             XDocument doc = XDocument.Load(configPath);
             XElement root = doc.Root;
@@ -94,9 +178,13 @@ namespace UabHooker
                 {
                     string name = (string)uab.Attribute("name") ?? "";
                     string to = ResolveToPath((string)uab.Attribute("to") ?? "", baseDir);
-                    bool enable = (bool?)uab.Attribute("enable") ?? true;
-                    if (!enable || string.IsNullOrEmpty(name) || string.IsNullOrEmpty(to)) continue;
-                    _replaceUab[name] = to;
+                    string enableRaw = (string)uab.Attribute("enable") ?? "true";
+                    if (string.IsNullOrEmpty(name) || string.IsNullOrEmpty(to)) continue;
+                    var info = new FileReplaceInfo { filePath = to };
+                    info.enableCond = ParseEnableCondition(enableRaw, modIdStr);
+                    if (info.enableCond.type == EnableCondition.CondType.Static && !info.enableCond.staticValue)
+                        continue;
+                    _replaceUab[name] = info;
                     MyUtils.MyLog($"配置[HookUab] {name} -> {to}");
                 }
             }
@@ -108,29 +196,36 @@ namespace UabHooker
                 {
                     string bundleName = (string)uab.Attribute("name") ?? "";
                     string to = ResolveToPath((string)uab.Attribute("to") ?? "", baseDir);
-                    bool enable = (bool?)uab.Attribute("enable") ?? true;
-                    if (!enable || string.IsNullOrEmpty(bundleName)) continue;
+                    string uabEnableRaw = (string)uab.Attribute("enable") ?? "true";
+                    if (string.IsNullOrEmpty(bundleName)) continue;
+
+                    var uabInfo = new FileReplaceInfo { filePath = to };
+                    uabInfo.enableCond = ParseEnableCondition(uabEnableRaw, modIdStr);
+                    if (uabInfo.enableCond.type == EnableCondition.CondType.Static && !uabInfo.enableCond.staticValue)
+                        continue;
 
                     if (!string.IsNullOrEmpty(to))
                     {
-                        _replaceUab[bundleName] = to;
+                        _replaceUab[bundleName] = uabInfo;
                         MyUtils.MyLog($"配置[HookImg->整包] {bundleName} -> {to}");
                         continue;
                     }
 
                     if (!_replaceImg.TryGetValue(bundleName, out var map))
-                        _replaceImg[bundleName] = map = new Dictionary<string, string>();
+                        _replaceImg[bundleName] = map = new Dictionary<string, FileReplaceInfo>();
 
                     foreach (var img in uab.Elements("img"))
                     {
                         string assetPath = (string)img.Attribute("assetPath") ?? "";
                         string imgTo = ResolveToPath((string)img.Attribute("to") ?? "", baseDir);
-                        bool imgEnable = (bool?)img.Attribute("enable") ?? true;
-                        if (!imgEnable || string.IsNullOrEmpty(assetPath) || string.IsNullOrEmpty(imgTo)) continue;
-                        {
-                            map[assetPath] = imgTo;
-                            MyUtils.MyLog($"配置[HookImg] [{bundleName}] {assetPath} -> {imgTo}");
-                        }
+                        string imgEnableRaw = (string)img.Attribute("enable") ?? "true";
+                        if (string.IsNullOrEmpty(assetPath) || string.IsNullOrEmpty(imgTo)) continue;
+                        var imgInfo = new FileReplaceInfo { filePath = imgTo };
+                        imgInfo.enableCond = ParseEnableCondition(imgEnableRaw, modIdStr);
+                        if (imgInfo.enableCond.type == EnableCondition.CondType.Static && !imgInfo.enableCond.staticValue)
+                            continue;
+                        map[assetPath] = imgInfo;
+                        MyUtils.MyLog($"配置[HookImg] [{bundleName}] {assetPath} -> {imgTo}");
                     }
                 }
             }
@@ -141,22 +236,29 @@ namespace UabHooker
                 foreach (var skel in hook.Elements("skel"))
                 {
                     string skelName = (string)skel.Attribute("name") ?? "";
-                    bool enable = (bool?)skel.Attribute("enable") ?? true;
-                    if (!enable || string.IsNullOrEmpty(skelName)) continue;
+                    string skelEnableRaw = (string)skel.Attribute("enable") ?? "true";
+                    if (string.IsNullOrEmpty(skelName)) continue;
+
+                    var skelInfo = new FileReplaceInfo();
+                    skelInfo.enableCond = ParseEnableCondition(skelEnableRaw, modIdStr);
+                    if (skelInfo.enableCond.type == EnableCondition.CondType.Static && !skelInfo.enableCond.staticValue)
+                        continue;
 
                     if (!_replaceSpineImg.TryGetValue(skelName, out var map))
-                        _replaceSpineImg[skelName] = map = new Dictionary<string, string>();
+                        _replaceSpineImg[skelName] = map = new Dictionary<string, FileReplaceInfo>();
 
                     foreach (var img in skel.Elements("img"))
                     {
                         string imgName = (string)img.Attribute("name") ?? "";
                         string to = ResolveToPath((string)img.Attribute("to") ?? "", baseDir);
-                        bool imgEnable = (bool?)img.Attribute("enable") ?? true;
-                        if (!imgEnable || string.IsNullOrEmpty(imgName) || string.IsNullOrEmpty(to)) continue;
-                        {
-                            map[imgName] = to;
-                            MyUtils.MyLog($"配置[HookSpineImg] [{skelName}] {imgName} -> {to}");
-                        }
+                        string imgEnableRaw = (string)img.Attribute("enable") ?? "true";
+                        if (string.IsNullOrEmpty(imgName) || string.IsNullOrEmpty(to)) continue;
+                        var imgInfo = new FileReplaceInfo { filePath = to };
+                        imgInfo.enableCond = ParseEnableCondition(imgEnableRaw, modIdStr);
+                        if (imgInfo.enableCond.type == EnableCondition.CondType.Static && !imgInfo.enableCond.staticValue)
+                            continue;
+                        map[imgName] = imgInfo;
+                        MyUtils.MyLog($"配置[HookSpineImg] [{skelName}] {imgName} -> {to}");
                     }
                 }
             }
@@ -170,17 +272,21 @@ namespace UabHooker
                     bool atlasEnable = (bool?)atlas.Attribute("enable") ?? true;
                     if (!atlasEnable || string.IsNullOrEmpty(atlasName)) continue;
 
-                    if (!_replaceAtlas.TryGetValue(atlasName, out var map))
-                        _replaceAtlas[atlasName] = map = new Dictionary<string, SpriteReplaceInfo>();
+                    if (!_sourceAtlas.TryGetValue(atlasName, out var map))
+                        _sourceAtlas[atlasName] = map = new Dictionary<string, List<SpriteReplaceInfo>>();
 
                     foreach (var sprite in atlas.Elements("sprite"))
                     {
                         string spriteName = (string)sprite.Attribute("name") ?? "";
                         string to = ResolveToPath((string)sprite.Attribute("to") ?? "", baseDir);
-                        bool spriteEnable = (bool?)sprite.Attribute("enable") ?? true;
-                        if (!spriteEnable || string.IsNullOrEmpty(spriteName) || string.IsNullOrEmpty(to)) continue;
+                        string enableRaw = (string)sprite.Attribute("enable") ?? "true";
+                        if (string.IsNullOrEmpty(spriteName) || string.IsNullOrEmpty(to)) continue;
 
                         var info = new SpriteReplaceInfo { filePath = to };
+                        info.enableCond = ParseEnableCondition(enableRaw, modIdStr);
+                        // 静态 false 直接跳过
+                        if (info.enableCond.type == EnableCondition.CondType.Static && !info.enableCond.staticValue)
+                            continue;
                         int wVal, hVal;
                         float px, py;
                         if (sprite.Attribute("w") != null && int.TryParse((string)sprite.Attribute("w"), out wVal))
@@ -196,7 +302,10 @@ namespace UabHooker
                             info.hasPos = true; info.posY = py;
                         }
 
-                        map[spriteName] = info;
+                        // 添加到列表，支持同名不同条件
+                        if (!map.TryGetValue(spriteName, out var list))
+                            map[spriteName] = list = new List<SpriteReplaceInfo>();
+                        list.Add(info);
                         string extInfo = "";
                         if (info.w > 0 && info.h > 0) extInfo += $" w={info.w} h={info.h}";
                         if (info.hasPos) extInfo += $" pos({info.posX},{info.posY})";
@@ -206,6 +315,9 @@ namespace UabHooker
             }
         }
 
+        // ← 记录我们关注的 mod 的 ModId 字符串，用于 UpdateModSettingsInGame 过滤
+        private static HashSet<string> _watchedModIdStrs = new HashSet<string>();
+
         public override void Dispose() { harmony?.UnpatchSelf(); }
         public override void OnModSettingUpdate()
         {
@@ -214,6 +326,86 @@ namespace UabHooker
             ModManager.GetSetting(ModIdStr, "logEntryImg", ref logEntryImg);
             ModManager.GetSetting(ModIdStr, "logEntrySpineImg", ref logEntrySpineImg);
             ModManager.GetSetting(ModIdStr, "logEntryAtlas", ref logEntryAtlas);
+
+            // 首次启动时延迟重建，等所有 mod 设置还原
+            GameApp.Instance.StartCoroutine(DelayedRebuild());
+        }
+
+        private static IEnumerator DelayedRebuild()
+        {
+            yield return null;
+            RebuildActiveEntries();
+        }
+
+        /// <summary>
+        /// Hook ModManager.UpdateModSettingsInGame —— 当游戏内任何 mod 的设置发生变更时触发。
+        /// 根据 modId 过滤 _watchedModIdStrs，只在我们关注的 mod 上重建。
+        /// </summary>
+        [HarmonyPostfix]
+        [HarmonyPatch(typeof(ModManager), "UpdateModSettingsInGame")]
+        public static void OnUpdateModSettingsInGame(GameData.Domains.Mod.ModId modId)
+        {
+            string key = modId.ToString();
+            if (_watchedModIdStrs.Contains(key))
+            {
+                MyUtils.MyLog($"[Hook] 检测到关注的 mod 设置变化: {key}，重建有效条目");
+                RebuildActiveEntries();
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        //  运行时快照刷新 — 在设置变化时按 enable 条件过滤出有效条目
+        // ═══════════════════════════════════════════════════════════════
+
+        private static void RebuildActiveEntries()
+        {
+            // _replaceUab
+            _activeUab.Clear();
+            foreach (var kv in _replaceUab)
+                if (kv.Value.enableCond.IsEnabled())
+                    _activeUab[kv.Key] = kv.Value;
+
+            // _replaceImg
+            _activeImg.Clear();
+            foreach (var bundleKv in _replaceImg)
+            {
+                var inner = new Dictionary<string, FileReplaceInfo>();
+                foreach (var kv in bundleKv.Value)
+                    if (kv.Value.enableCond.IsEnabled())
+                        inner[kv.Key] = kv.Value;
+                if (inner.Count > 0)
+                    _activeImg[bundleKv.Key] = inner;
+            }
+
+            // _replaceSpineImg
+            _activeSpineImg.Clear();
+            foreach (var skelKv in _replaceSpineImg)
+            {
+                var inner = new Dictionary<string, FileReplaceInfo>();
+                foreach (var kv in skelKv.Value)
+                    if (kv.Value.enableCond.IsEnabled())
+                        inner[kv.Key] = kv.Value;
+                if (inner.Count > 0)
+                    _activeSpineImg[skelKv.Key] = inner;
+            }
+
+            // _sourceAtlas → _activeAtlas
+            _activeAtlas.Clear();
+            foreach (var atlasKv in _sourceAtlas)
+            {
+                var inner = new Dictionary<string, List<SpriteReplaceInfo>>();
+                foreach (var spriteKv in atlasKv.Value)
+                {
+                    var list = new List<SpriteReplaceInfo>();
+                    foreach (var info in spriteKv.Value)
+                        if (info.enableCond.IsEnabled())
+                            list.Add(info);
+                    if (list.Count > 0)
+                        inner[spriteKv.Key] = list;
+                }
+                if (inner.Count > 0)
+                    _activeAtlas[atlasKv.Key] = inner;
+            }
         }
 
         // ═══════════════════════════════════════════════════════════════
@@ -224,16 +416,16 @@ namespace UabHooker
         [HarmonyPatch(typeof(AssetBundle), "LoadFromFile", new Type[] { typeof(string) })]
         public static void Prefix_LoadFromFile(ref string path)
         {
-            if (string.IsNullOrEmpty(path) || _replaceUab.Count == 0)
+            if (string.IsNullOrEmpty(path) || _activeUab.Count == 0)
             { if (logEntryUab && !string.IsNullOrEmpty(path)) MyUtils.MyLog("[HookUab] 入口: path=" + path); return; }
             if (logEntryUab) MyUtils.MyLog("[HookUab] 入口: path=" + path);
 
-            if (_replaceUab.TryGetValue(path, out string rp))
-            { if (logReplace) MyUtils.MyLog("[HookUab] 替换: " + path + " -> " + rp); path = rp; return; }
+            if (_activeUab.TryGetValue(path, out var info))
+            { if (logReplace) MyUtils.MyLog("[HookUab] 替换: " + path + " -> " + info.filePath); path = info.filePath; return; }
 
             string fn = Path.GetFileName(path);
-            if (!string.IsNullOrEmpty(fn) && _replaceUab.TryGetValue(fn, out rp))
-            { if (logReplace) MyUtils.MyLog("[HookUab] 替换: " + path + " -> " + rp); path = rp; }
+            if (!string.IsNullOrEmpty(fn) && _activeUab.TryGetValue(fn, out info))
+            { if (logReplace) MyUtils.MyLog("[HookUab] 替换: " + path + " -> " + info.filePath); path = info.filePath; }
         }
 
         // ═══════════════════════════════════════════════════════════════
@@ -246,7 +438,7 @@ namespace UabHooker
         public static bool ResourcePackage_Pre(Type type, List<string> dependenceList, string assetPath, string assetName,
             ref ValueTuple<FrameWork.AssetBundlePackage.ResourcePackage, string, UnityEngine.Object> __result)
         {
-            if (_replaceImg.Count == 0) { if (logEntryImg && !string.IsNullOrEmpty(assetPath)) MyUtils.MyLog("[HookImg] 入口: assetPath=" + assetPath + " type=" + type?.Name); return true; }
+            if (_activeImg.Count == 0) { if (logEntryImg && !string.IsNullOrEmpty(assetPath)) MyUtils.MyLog("[HookImg] 入口: assetPath=" + assetPath + " type=" + type?.Name); return true; }
             if (logEntryImg) MyUtils.MyLog("[HookImg] 入口: assetPath=" + (assetPath ?? assetName) + " type=" + type?.Name);
 
             // 只替换我们支持的资源类型，其他类型放行
@@ -256,24 +448,24 @@ namespace UabHooker
             // 尝试匹配完整 assetPath
             if (!string.IsNullOrEmpty(assetPath))
             {
-                foreach (var bundleKv in _replaceImg)
+                foreach (var bundleKv in _activeImg)
                 {
-                    if (bundleKv.Value.TryGetValue(assetPath, out string f))
+                    if (bundleKv.Value.TryGetValue(assetPath, out var imgInfo))
                     {
-                        var r = LoadRep(f, type);
-                        if (r != null) { if (logReplace) MyUtils.MyLog("[HookImg] 替换: " + assetPath + " -> " + f); __result = new ValueTuple<FrameWork.AssetBundlePackage.ResourcePackage, string, UnityEngine.Object>(null, null, r); return false; }
+                        var r = LoadRep(imgInfo.filePath, type);
+                        if (r != null) { if (logReplace) MyUtils.MyLog("[HookImg] 替换: " + assetPath + " -> " + imgInfo.filePath); __result = new ValueTuple<FrameWork.AssetBundlePackage.ResourcePackage, string, UnityEngine.Object>(null, null, r); return false; }
                     }
                 }
                 // 也匹配短名
                 string shortName = Path.GetFileName(assetPath);
                 if (shortName != assetPath)
                 {
-                    foreach (var bundleKv in _replaceImg)
+                    foreach (var bundleKv in _activeImg)
                     {
-                        if (bundleKv.Value.TryGetValue(shortName, out string f))
+                        if (bundleKv.Value.TryGetValue(shortName, out var imgInfo))
                         {
-                            var r = LoadRep(f, type);
-                            if (r != null) { if (logReplace) MyUtils.MyLog("[HookImg] 替换(短名): " + shortName + " -> " + f); __result = new ValueTuple<FrameWork.AssetBundlePackage.ResourcePackage, string, UnityEngine.Object>(null, null, r); return false; }
+                            var r = LoadRep(imgInfo.filePath, type);
+                            if (r != null) { if (logReplace) MyUtils.MyLog("[HookImg] 替换(短名): " + shortName + " -> " + imgInfo.filePath); __result = new ValueTuple<FrameWork.AssetBundlePackage.ResourcePackage, string, UnityEngine.Object>(null, null, r); return false; }
                         }
                     }
                 }
@@ -290,7 +482,7 @@ namespace UabHooker
 		[HarmonyPatch(typeof(SkeletonGraphic), "Initialize")]
 		public static void SkeletonGraphic_Pre(SkeletonGraphic __instance)
         {
-            if (_replaceSpineImg.Count == 0 || __instance == null) { if (logEntrySpineImg) MyUtils.MyLog("[HookSpineImg] 入口: cnt=0/null"); return; }
+            if (_activeSpineImg.Count == 0 || __instance == null) { if (logEntrySpineImg) MyUtils.MyLog("[HookSpineImg] 入口: cnt=0/null"); return; }
 
             var tra = Traverse.Create(__instance);
             var sda = tra.Property("SkeletonDataAsset").GetValue<SkeletonDataAsset>();
@@ -303,17 +495,17 @@ namespace UabHooker
 			if (mainTexture == null) return;
 
 			// 按skel名称匹配
-			foreach (var skelKv in _replaceSpineImg)
+			foreach (var skelKv in _activeSpineImg)
             {
                 if (sdaName.IndexOf(skelKv.Key, StringComparison.OrdinalIgnoreCase) < 0) continue;
 
 				var sdaTra = Traverse.Create(sda);
-				if (skelKv.Value.TryGetValue(mainTexture.name, out string pngFile))
+				if (skelKv.Value.TryGetValue(mainTexture.name, out var spineInfo))
 				{
 					if (mainTexture.name.StartsWith("uabhook_"))
 					{ if (logEntrySpineImg) MyUtils.MyLog("[HookSpineImg] 已替换跳过: " + mainTexture.name); continue; }
 
-					Texture2D newTex = GetOrLoadTexture(pngFile);
+					Texture2D newTex = GetOrLoadTexture(spineInfo.filePath);
 					if (newTex == null) continue;
 					__instance.OverrideTexture = newTex;
 					if (logReplace) MyUtils.MyLog("[HookSpineImg] 替换: [" + skelKv.Key + "] " + mainTexture.name + " -> " + __instance.OverrideTexture.name);
@@ -355,20 +547,23 @@ namespace UabHooker
         [HarmonyPatch(typeof(SpriteAtlas), "GetSprite", new Type[] { typeof(string) })]
         public static bool SpriteAtlas_GetSprite_Pre(SpriteAtlas __instance, string name, ref Sprite __result)
         {
-            if (_replaceAtlas.Count == 0) return true;
+            if (_activeAtlas.Count == 0) return true;
             string atlasName = __instance.name;
             if (logEntryAtlas) MyUtils.MyLog("[HookAtlas] 入口: atlas=" + atlasName + " sprite=" + name);
 
-            if (_replaceAtlas.TryGetValue(atlasName, out var sprites) && sprites.TryGetValue(name, out var info))
+            if (_activeAtlas.TryGetValue(atlasName, out var sprites) && sprites.TryGetValue(name, out var list))
             {
-                Texture2D tex = GetOrLoadTexture(info.filePath);
-                if (tex == null) { if (logReplace) MyUtils.MyLog("[HookAtlas] 加载失败: " + info.filePath); return true; }
+                foreach (var info in list)
+                {
+                    Texture2D tex = GetOrLoadTexture(info.filePath);
+                    if (tex == null) { if (logReplace) MyUtils.MyLog("[HookAtlas] 加载失败: " + info.filePath); continue; }
 
-                var sprite = Sprite.Create(tex, new Rect(0, 0, tex.width, tex.height), new Vector2(0.5f, 0.5f));
-                sprite.name = name;
-                __result = sprite;
-                if (logReplace) MyUtils.MyLog("[HookAtlas] 替换: [" + atlasName + "] " + name + " -> " + info.filePath);
-                return false;
+                    var sprite = Sprite.Create(tex, new Rect(0, 0, tex.width, tex.height), new Vector2(0.5f, 0.5f));
+                    sprite.name = name;
+                    __result = sprite;
+                    if (logReplace) MyUtils.MyLog("[HookAtlas] 替换: [" + atlasName + "] " + name + " -> " + info.filePath);
+                    return false;
+                }
             }
             return true;
         }
@@ -381,13 +576,14 @@ namespace UabHooker
         [HarmonyPatch(typeof(AtlasInfo), "SetImageSpriteOnly", new Type[] { typeof(CImage), typeof(string) })]
         public static bool AtlasInfo_SetImageSpriteOnly_Pre(CImage image, string spriteName, ref bool __result)
         {
-            if (_replaceAtlas.Count == 0) return true;
+            if (_activeAtlas.Count == 0) return true;
             if (image == null || string.IsNullOrEmpty(spriteName)) return true;
             if (logEntryAtlas) MyUtils.MyLog("[HookAtlas] SetImageSpriteOnly 入口: sprite=" + spriteName);
 
-            foreach (var atlasKv in _replaceAtlas)
+            foreach (var atlasKv in _activeAtlas)
             {
-                if (atlasKv.Value.TryGetValue(spriteName, out var info))
+                if (!atlasKv.Value.TryGetValue(spriteName, out var list)) continue;
+                foreach (var info in list)
                 {
                     Texture2D tex = GetOrLoadTexture(info.filePath);
                     if (tex == null)
