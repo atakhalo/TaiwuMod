@@ -909,6 +909,11 @@ namespace NpcFace
 			var ac = Traverse.Create(__instance).Field("avatarContainer").GetValue<GameObject>();
 			var gc = Traverse.Create(__instance).Field("gravestoneContainer").GetValue<GameObject>();
 			bool noInit = false;
+			if(ac == null || gc == null) // 有些地方没有两个？直接返回
+			{
+				noInit = false;
+				return true;
+			}
 			if(ac.activeSelf && gc.activeSelf) noInit = true;
 			// MyUtils.MyLog($"QuickCheckNoInit {noInit}");
 			if(!noInit) return false;
