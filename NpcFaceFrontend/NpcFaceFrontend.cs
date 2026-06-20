@@ -974,8 +974,11 @@ namespace NpcFace
 		#endregion
 
 		#region hook 游戏中的加载接口，然后寻找name进行立绘替换
-		public static bool QuickCheckNoInit(TaiwuAvatar __instance)
+		// 之前游戏默认有开启的，更新后没有了，现在不需要了
+		public static bool QuickCheckNoInit(TaiwuAvatar __instance, out bool tobreak)
 		{
+			tobreak = false;
+
 			var ac = Traverse.Create(__instance).Field("avatarContainer").GetValue<GameObject>();
 			var gc = Traverse.Create(__instance).Field("gravestoneContainer").GetValue<GameObject>();
 			bool noInit = false;
@@ -985,8 +988,7 @@ namespace NpcFace
 				return true;
 			}
 			if(ac.activeSelf && gc.activeSelf) noInit = true;
-			// MyUtils.MyLog($"QuickCheckNoInit {noInit}");
-			if(!noInit) return false;
+			else return false;
 			for (int i = 0; i < __instance.transform.childCount; i++)
 			{
 				__instance.transform.GetChild(i).gameObject.SetActive(false);
@@ -998,7 +1000,8 @@ namespace NpcFace
 		public static bool OnRefreshChar_Dis_Pre(TaiwuAvatar __instance, CharacterDisplayData displayData, bool isShowGrave)
 		{
 			if (!npcFace) return true;
-			QuickCheckNoInit(__instance);
+			QuickCheckNoInit(__instance, out var tobreak);
+			if(tobreak) return false;
 			GameApp.Instance.StartCoroutine(DelayCoroutine_OnRefreshChar_Dis(OnRefreshChar_Dis_Wrapper, 0, __instance, displayData, isShowGrave));
 			return false;
 		}
@@ -1041,7 +1044,8 @@ namespace NpcFace
 		public static bool OnRefreshChar_Related_Pre(TaiwuAvatar __instance, AvatarRelatedData relatedData)
 		{
 			if (!npcFace) return true;
-			QuickCheckNoInit(__instance);
+			QuickCheckNoInit(__instance, out var tobreak);
+			if (tobreak) return false;
 			GameApp.Instance.StartCoroutine(DelayCoroutine_OnRefreshChar_Related(OnRefreshChar_Related_Wrapper, 0, __instance, relatedData));
 			return false;
 		}
@@ -1108,7 +1112,8 @@ namespace NpcFace
 		{
 			if (!npcFace) return true;
 			var avatar = Traverse.Create(__instance).Field("_avatar").GetValue<TaiwuAvatar>();
-			QuickCheckNoInit(avatar);
+			QuickCheckNoInit(avatar, out var tobreak);
+			if (tobreak) return false;
 			GameApp.Instance.StartCoroutine(DelayCoroutine_FillElement(FillElement_Wrapper, 0, __instance));
 			return false;
 		}
