@@ -295,6 +295,42 @@ namespace NpcFace
 		// 记录 配置文件名 对应 spine 配置 （如 皮肤、皮肤图集、默认动画）
 		public static Dictionary<string, SpineConfig> spineConfigs = new Dictionary<string, SpineConfig>();
 
+		/// <summary>
+		/// Spine 运行时资源缓存，缓存 AtlasAsset + SkeletonDataAsset
+		/// 避免每次刷新都新建 Texture2D / SpineAtlasAsset / SkeletonDataAsset 造成内存泄漏
+		/// OnModSettingUpdate 中清理
+		/// </summary>
+		public class SpineCachedAssets
+		{
+			public SpineAtlasAsset AtlasAsset;
+			public SkeletonDataAsset SkeletonAsset;
+			public List<Texture2D> Textures = new List<Texture2D>();
+
+			public void Destroy()
+			{
+				// 先销毁 SkeletonDataAsset
+				if (SkeletonAsset != null)
+				{
+					UnityEngine.Object.Destroy(SkeletonAsset);
+					SkeletonAsset = null;
+				}
+				// 再销毁 SpineAtlasAsset（它持有 atlas 文本 Asset）
+				if (AtlasAsset != null)
+				{
+					UnityEngine.Object.Destroy(AtlasAsset);
+					AtlasAsset = null;
+				}
+				// 最后销毁原始纹理（SpineAtlasAsset 内部可能已引用，但 Destroy 后仍要确保释放）
+				foreach (var tex in Textures)
+				{
+					if (tex != null)
+						UnityEngine.Object.Destroy(tex);
+				}
+				Textures.Clear();
+			}
+		}
+		public static Dictionary<string, SpineCachedAssets> spineCache = new Dictionary<string, SpineCachedAssets>();
+
         public override void Initialize()
         {
 			MyUtils.MyLog("Initialize");
@@ -353,7 +389,41 @@ namespace NpcFace
 			// 目前小图片都没有 npcSkeleton，samllSpine没有用
 			// ModManager.GetSetting(ModIdStr, "samllSpine", ref samllSpine); // 
 
+			// 从最新的 npcRes + 太吾设置中收集仍在使用的 spine key，跳过销毁
+			var activeKeys = new HashSet<string>();
+			if (npcFace)
+			{
+				activeKeys.Add(GetActiveAvatarAssetName());
+				foreach (var v in npcRes.Values)
+					if (!string.IsNullOrEmpty(v))
+						activeKeys.Add(v);
+			}
+			// 清空 spine 配置缓存
 			spineConfigs.Clear();
+			// 清空 spine 运行时资源缓存，销毁未在使用的资源
+			var keysToRemove = new List<string>();
+			foreach (var kv in spineCache)
+			{
+				if (!activeKeys.Contains(kv.Key))
+				{
+					kv.Value.Destroy();
+					keysToRemove.Add(kv.Key);
+				}
+			}
+			foreach (var k in keysToRemove)
+				spineCache.Remove(k);
+
+			// 清空 sprite 纹理缓存，销毁 Sprite 及其引用的 Texture2D
+			foreach (var kv in resCache)
+			{
+				if (kv.Value != null)
+				{
+					if (kv.Value.texture != null)
+						UnityEngine.Object.Destroy(kv.Value.texture);
+					UnityEngine.Object.Destroy(kv.Value);
+				}
+			}
+			resCache.Clear();
 		}
 
 		/// <summary>
@@ -1104,6 +1174,16 @@ namespace NpcFace
 
 		#endregion
 
+		/// <summary>
+		/// 获取当前设置中太吾使用的 avatarAssetName，用于 OnModSettingUpdate 保留对应 spine 缓存
+		/// </summary>
+		private static string GetActiveAvatarAssetName()
+		{
+			if (customNpc && !string.IsNullOrEmpty(npcNameCustom))
+				return npcNameCustom;
+			return npcName[npcNameIdx];
+		}
+
 		#region 资源加载
         private static bool resLoad(TaiwuAvatar avatar, CharacterAvatar? instance, bool isTaiwu, string res=null)
         {
@@ -1142,6 +1222,7 @@ namespace NpcFace
 						toSpine = true;
 				}
 			}
+			// MyUtils.MyLog($"resLoad spine? {toSpine}, {avatar.PreferDynamicAvatar}");
 			if (toSpine)
 			{
 				if(TrySpine(avatar, instance, avatarAssetName, isTaiwu))
@@ -1155,7 +1236,7 @@ namespace NpcFace
 			// MyUtils.MyLog("TrySpine 开始尝试走spine");
 			// 先尝试获取 spine 文件（spine 骨骼，spine atlas, spine png）
 			var dir = TryLoadResDir(avatarAssetName, out var fileName);
-			// MyUtils.MyLog($"TrySpine 读取到1 {dir}, {fileName}");
+			// MyUtils.MyLog($"TrySpine {avatarAssetName} 读取到1 {dir}, {fileName}");
 
 			// if (!isTaiwu) // 调试时，只显示太吾
 			// 	return TrySpineBuiltIn(avatar, instance, avatarAssetName);
@@ -1170,6 +1251,7 @@ namespace NpcFace
 				GetSpinePath(config, out string skelPath, out string atlasPath);
 				if(skelPath == "" && atlasPath == "") // 如果都没有，就是静态图片
 					return false;
+				// MyUtils.MyLog($"TrySpine 读取到20 {avatarAssetName}");
 				// MyUtils.MyLog($"TrySpine 读取到21 {dir}, {fileName}");
 				// MyUtils.MyLog($"TrySpine 读取到22 {skelPath}");
 				// MyUtils.MyLog($"TrySpine 读取到23 {atlasPath}");
@@ -1190,6 +1272,7 @@ namespace NpcFace
 				fileDir = Path.Combine(dir, "Spine", fileName),
 				keyName = avatarAssetName,
 				fileName = fileName,
+				skelName = fileName,
 				altas = new List<string>(),
 				skinName = "",
 				animName = "",
@@ -1307,19 +1390,36 @@ namespace NpcFace
 
 		/// <summary>
 		/// 从文件系统加载 spine 资源（.skel + .atlas + .png）并应用到 avatar
+		/// 使用 spineCache 缓存 SkeletonDataAsset + SpineAtlasAsset，避免重复创建导致内存泄漏
 		/// </summary>
 		private static bool TrySpineFromFiles(TaiwuAvatar avatar, CharacterAvatar? instance, SpineConfig spineConfig,
 			string skelPath, string atlasPath)
 		{
 			// MyUtils.MyLog($"开始走自定义流程 TrySpineFromFiles");
 
-			if (!TryLoadSpineAtlas(avatar, spineConfig, atlasPath, out var atlasAsset, out var atlas))
-				return false;
+			var cacheKey = spineConfig.keyName;
 
-			if (!TryCreateSkeletonDataAsset(spineConfig, skelPath, atlas, atlasAsset, out var asset))
-				return false;
+			// 缓存未命中或已失效，重新加载
+			if (!spineCache.TryGetValue(cacheKey, out var cached) || cached == null || cached.SkeletonAsset == null)
+			{
+				if (!TryLoadSpineAtlas(avatar, spineConfig, atlasPath, out var atlasAsset, out var atlas, out var createdTextures))
+					return false;
 
-			if (!TryApplySpineAsset(avatar, instance, spineConfig, asset))
+				if (!TryCreateSkeletonDataAsset(spineConfig, skelPath, atlas, atlasAsset, out var asset))
+					return false;
+
+				cached = new SpineCachedAssets
+				{
+					AtlasAsset = atlasAsset,
+					SkeletonAsset = asset,
+					Textures = createdTextures
+				};
+				spineCache[cacheKey] = cached;
+				// MyUtils.MyLog($"TrySpineFromFiles: 缓存新建 {cacheKey}");
+			}
+			// else { MyUtils.MyLog($"TrySpineFromFiles: 命中缓存 {cacheKey}"); }
+
+			if (!TryApplySpineAsset(avatar, instance, spineConfig, cached.SkeletonAsset))
 				return false;
 
 			// MyUtils.MyLog($"TrySpineFromFiles: success {Path.GetFileName(skelPath)}");
@@ -1330,14 +1430,14 @@ namespace NpcFace
 		/// 加载图集：读取 .atlas 文本和 .png 纹理，创建 SpineAtlasAsset
 		/// </summary>
 		private static bool TryLoadSpineAtlas(TaiwuAvatar avatar, SpineConfig spineConfig, string atlasPath, 
-			out SpineAtlasAsset atlasAsset, out Atlas atlas)
+			out SpineAtlasAsset atlasAsset, out Atlas atlas, out List<Texture2D> createdTextures)
 		{
 			atlasAsset = null;
 			atlas = null;
+			createdTextures = new List<Texture2D>();
 			string atlasContent = File.ReadAllText(atlasPath);
 			var textAsset = new TextAsset(atlasContent);
 
-			List<Texture2D> altas = new List<Texture2D>();
 			for (int i = 0; i < spineConfig.altas.Count; i++)
 			{
 				var item = spineConfig.altas[i];
@@ -1347,14 +1447,14 @@ namespace NpcFace
 				Texture2D texture = new Texture2D(1, 1);
 				texture.LoadImage(pngBytes);
 				texture.name = item;
-				altas.Add(texture);
+				createdTextures.Add(texture);
 			}
 
 			// 从 avatar 的 npcSkeleton 克隆材质
 			var npcSkeleton = Traverse.Create(avatar).Field("npcSkeleton").GetValue<SkeletonGraphic>();
 			UnityEngine.Material templateMat = npcSkeleton.material;
 
-			atlasAsset = SpineAtlasAsset.CreateRuntimeInstance(textAsset, altas.ToArray(), templateMat, true);
+			atlasAsset = SpineAtlasAsset.CreateRuntimeInstance(textAsset, createdTextures.ToArray(), templateMat, true);
 			atlas = atlasAsset.GetAtlas();
 
 			// MyUtils.MyLog($"TryLoadSpineAtlas: success {Path.GetFileName(atlasPath)}");
