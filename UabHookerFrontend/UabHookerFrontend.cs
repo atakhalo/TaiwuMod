@@ -21,11 +21,25 @@ namespace UabHooker
     {
         private Harmony harmony;
 
-        // ← 三种替换规则
+        // ← 替换规则
         private static Dictionary<string, string> _replaceUab = new Dictionary<string, string>(); // uab名 → 替换文件
         private static Dictionary<string, Dictionary<string, string>> _replaceImg = new Dictionary<string, Dictionary<string, string>>(); // bundle名 → { assetPath → 文件 }
         private static Dictionary<string, Dictionary<string, string>> _replaceSpineImg = new Dictionary<string, Dictionary<string, string>>(); // skel名称 → { 纹理名 → 文件 }
-        private static Dictionary<string, Dictionary<string, string>> _replaceAtlas = new Dictionary<string, Dictionary<string, string>>(); // 图集名 → { 精灵名 → png文件 }
+
+        // ← 精灵替换信息（含可选的 w/h 尺寸）
+        private class SpriteReplaceInfo
+        {
+            public string filePath = "";
+            public int w = -1; // -1 表示不指定，使用原始尺寸
+            public int h = -1;
+            public bool hasPos = false; // 是否指定了 posx/posy
+            public float posX = 0;
+            public float posY = 0;
+        }
+        private static Dictionary<string, Dictionary<string, SpriteReplaceInfo>> _replaceAtlas = new Dictionary<string, Dictionary<string, SpriteReplaceInfo>>(); // 图集名 → { 精灵名 → 替换信息 }
+
+        // ← 贴图缓存（文件路径 → Texture2D）
+        private static Dictionary<string, Texture2D> _texCache = new Dictionary<string, Texture2D>();
 
         // ← 日志开关
         private static bool logReplace = true;
@@ -157,7 +171,7 @@ namespace UabHooker
                     if (!atlasEnable || string.IsNullOrEmpty(atlasName)) continue;
 
                     if (!_replaceAtlas.TryGetValue(atlasName, out var map))
-                        _replaceAtlas[atlasName] = map = new Dictionary<string, string>();
+                        _replaceAtlas[atlasName] = map = new Dictionary<string, SpriteReplaceInfo>();
 
                     foreach (var sprite in atlas.Elements("sprite"))
                     {
@@ -165,8 +179,28 @@ namespace UabHooker
                         string to = ResolveToPath((string)sprite.Attribute("to") ?? "", baseDir);
                         bool spriteEnable = (bool?)sprite.Attribute("enable") ?? true;
                         if (!spriteEnable || string.IsNullOrEmpty(spriteName) || string.IsNullOrEmpty(to)) continue;
-                        map[spriteName] = to;
-                        MyUtils.MyLog($"配置[HookAtlas] [{atlasName}] {spriteName} -> {to}");
+
+                        var info = new SpriteReplaceInfo { filePath = to };
+                        int wVal, hVal;
+                        float px, py;
+                        if (sprite.Attribute("w") != null && int.TryParse((string)sprite.Attribute("w"), out wVal))
+                            info.w = wVal;
+                        if (sprite.Attribute("h") != null && int.TryParse((string)sprite.Attribute("h"), out hVal))
+                            info.h = hVal;
+                        if (sprite.Attribute("posx") != null && float.TryParse((string)sprite.Attribute("posx"), out px))
+                        {
+                            info.hasPos = true; info.posX = px;
+                        }
+                        if (sprite.Attribute("posy") != null && float.TryParse((string)sprite.Attribute("posy"), out py))
+                        {
+                            info.hasPos = true; info.posY = py;
+                        }
+
+                        map[spriteName] = info;
+                        string extInfo = "";
+                        if (info.w > 0 && info.h > 0) extInfo += $" w={info.w} h={info.h}";
+                        if (info.hasPos) extInfo += $" pos({info.posX},{info.posY})";
+                        MyUtils.MyLog($"配置[HookAtlas] [{atlasName}] {spriteName} -> {to}{extInfo}");
                     }
                 }
             }
@@ -279,10 +313,8 @@ namespace UabHooker
 					if (mainTexture.name.StartsWith("uabhook_"))
 					{ if (logEntrySpineImg) MyUtils.MyLog("[HookSpineImg] 已替换跳过: " + mainTexture.name); continue; }
 
-					Texture2D newTex = new Texture2D(2, 2);
-					byte[] bytes = File.ReadAllBytes(pngFile);
-					if (!newTex.LoadImage(bytes)) continue;
-					newTex.name = "uabhook_" + mainTexture.name;
+					Texture2D newTex = GetOrLoadTexture(pngFile);
+					if (newTex == null) continue;
 					__instance.OverrideTexture = newTex;
 					if (logReplace) MyUtils.MyLog("[HookSpineImg] 替换: [" + skelKv.Key + "] " + mainTexture.name + " -> " + __instance.OverrideTexture.name);
 
@@ -327,31 +359,87 @@ namespace UabHooker
             string atlasName = __instance.name;
             if (logEntryAtlas) MyUtils.MyLog("[HookAtlas] 入口: atlas=" + atlasName + " sprite=" + name);
 
-            if (_replaceAtlas.TryGetValue(atlasName, out var sprites) && sprites.TryGetValue(name, out string pngFile))
+            if (_replaceAtlas.TryGetValue(atlasName, out var sprites) && sprites.TryGetValue(name, out var info))
             {
-                if (!File.Exists(pngFile)) { if (logReplace) MyUtils.MyLog("[HookAtlas] 文件不存在: " + pngFile); return true; }
-                Texture2D tex = new Texture2D(2, 2);
-                byte[] bytes = File.ReadAllBytes(pngFile);
-                if (tex.LoadImage(bytes))
+                Texture2D tex = GetOrLoadTexture(info.filePath);
+                if (tex == null) { if (logReplace) MyUtils.MyLog("[HookAtlas] 加载失败: " + info.filePath); return true; }
+
+                var sprite = Sprite.Create(tex, new Rect(0, 0, tex.width, tex.height), new Vector2(0.5f, 0.5f));
+                sprite.name = name;
+                __result = sprite;
+                if (logReplace) MyUtils.MyLog("[HookAtlas] 替换: [" + atlasName + "] " + name + " -> " + info.filePath);
+                return false;
+            }
+            return true;
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        //  Hook 5: AtlasInfo.SetImageSpriteOnly — CImage 精灵替换
+        // ═══════════════════════════════════════════════════════════════
+
+        [HarmonyPrefix]
+        [HarmonyPatch(typeof(AtlasInfo), "SetImageSpriteOnly", new Type[] { typeof(CImage), typeof(string) })]
+        public static bool AtlasInfo_SetImageSpriteOnly_Pre(CImage image, string spriteName, ref bool __result)
+        {
+            if (_replaceAtlas.Count == 0) return true;
+            if (image == null || string.IsNullOrEmpty(spriteName)) return true;
+            if (logEntryAtlas) MyUtils.MyLog("[HookAtlas] SetImageSpriteOnly 入口: sprite=" + spriteName);
+
+            foreach (var atlasKv in _replaceAtlas)
+            {
+                if (atlasKv.Value.TryGetValue(spriteName, out var info))
                 {
+                    Texture2D tex = GetOrLoadTexture(info.filePath);
+                    if (tex == null)
+                    {
+                        if (logReplace) MyUtils.MyLog("[HookAtlas] SetImageSpriteOnly 加载失败: " + info.filePath);
+                        continue;
+                    }
                     var sprite = Sprite.Create(tex, new Rect(0, 0, tex.width, tex.height), new Vector2(0.5f, 0.5f));
-                    sprite.name = name;
-                    __result = sprite;
-                    if (logReplace) MyUtils.MyLog("[HookAtlas] 替换: [" + atlasName + "] " + name + " -> " + pngFile);
+                    sprite.name = spriteName;
+                    image.sprite = sprite;
+                    if (info.w > 0 && info.h > 0)
+                        image.rectTransform.sizeDelta = new Vector2(info.w, info.h);
+                    else if (image.AutoSize)
+                        image.SetNativeSize();
+                    if (info.hasPos)
+                        image.rectTransform.anchoredPosition = new Vector2(info.posX, info.posY);
+                    image.SetEnabled(true);
+                    __result = true;
+                    if (logReplace) MyUtils.MyLog("[HookAtlas] SetImageSpriteOnly 替换: " + spriteName + " -> " + info.filePath + (info.w > 0 ? $" ({info.w}x{info.h})" : "") + (info.hasPos ? $" pos({info.posX},{info.posY})" : ""));
                     return false;
                 }
             }
             return true;
         }
 
+        // ═══════════════════════════════════════════════════════════════
+        //  贴图缓存与加载工具
+        // ═══════════════════════════════════════════════════════════════
+
+        private static Texture2D GetOrLoadTexture(string path)
+        {
+            if (string.IsNullOrEmpty(path)) return null;
+            if (_texCache.TryGetValue(path, out var cached)) return cached;
+            if (!File.Exists(path)) return null;
+            byte[] bytes;
+            try { bytes = File.ReadAllBytes(path); } catch { return null; }
+            var tex = new Texture2D(2, 2);
+            if (!tex.LoadImage(bytes)) return null;
+            tex.name = "uabhook_" + Path.GetFileNameWithoutExtension(path);
+            _texCache[path] = tex;
+            if (logReplace) MyUtils.MyLog("[缓存] 加载贴图: " + path);
+            return tex;
+        }
+
         private static UnityEngine.Object LoadRep(string f, Type t)
         {
             if (!File.Exists(f)) return null;
             byte[] b; try { b = File.ReadAllBytes(f); } catch { return null; }
-            if (t == typeof(Texture2D) || t == null) { var tx = new Texture2D(2, 2); if (tx.LoadImage(b)) return tx; }
-            if (t == typeof(Sprite)) { var tx = new Texture2D(2, 2); if (tx.LoadImage(b)) return Sprite.Create(tx, new Rect(0, 0, tx.width, tx.height), new Vector2(0.5f, 0.5f)); }
+            if (t == typeof(Texture2D) || t == null) { var tx = GetOrLoadTexture(f); return tx; }
+            if (t == typeof(Sprite)) { var tx = GetOrLoadTexture(f); if (tx != null) return Sprite.Create(tx, new Rect(0, 0, tx.width, tx.height), new Vector2(0.5f, 0.5f)); }
             if (t == typeof(TextAsset)) return new TextAsset(System.Text.Encoding.UTF8.GetString(b));
-            var fb = new Texture2D(2, 2); if (fb.LoadImage(b)) return fb; return null;
+            var fb = GetOrLoadTexture(f); return fb;
         }
     }
 }
