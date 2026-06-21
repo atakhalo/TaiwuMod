@@ -34,10 +34,14 @@ namespace UabHooker
         private static Dictionary<string, Dictionary<string, FileReplaceInfo>> _activeSpineImg = new Dictionary<string, Dictionary<string, FileReplaceInfo>>();
         private static Dictionary<string, Dictionary<string, List<SpriteReplaceInfo>>> _activeAtlas = new Dictionary<string, Dictionary<string, List<SpriteReplaceInfo>>>(); // 运行时有效快照
 
-        // ← 源数据：Spine 完整资源替换（atlas + skel，含 enable 条件）
+        // ← 源数据：Spine 完整资源替换（hookSpine，atlas + skel，简单 SkeletonGraphic）
         private static Dictionary<string, SpineReplaceInfo> _replaceSpine = new Dictionary<string, SpineReplaceInfo>();
-        // ← 运行时快照
+        // ← 运行时快照（hookSpine）
         private static Dictionary<string, SpineReplaceInfo> _activeSpine = new Dictionary<string, SpineReplaceInfo>();
+        // ← 源数据：AvatarSpine 完整资源替换（hookAvatar，含 cover/coverKeep）
+        private static Dictionary<string, SpineReplaceInfo> _replaceAvatar = new Dictionary<string, SpineReplaceInfo>();
+        // ← 运行时快照（hookAvatar）
+        private static Dictionary<string, SpineReplaceInfo> _activeAvatar = new Dictionary<string, SpineReplaceInfo>();
         // ← Spine 运行时缓存（避免反复创建 SkeletonDataAsset）
         private static Dictionary<string, SpineCachedAssets> _spineCache = new Dictionary<string, SpineCachedAssets>();
 
@@ -138,6 +142,7 @@ namespace UabHooker
         private static bool logEntrySpineImg = false;
         private static bool logEntryAtlas = false;
         private static bool logEntrySpine = false;
+        private static bool logEntryAvatar = false;
 
         public override void Initialize()
         {
@@ -149,7 +154,7 @@ namespace UabHooker
 
             harmony = Harmony.CreateAndPatchAll(typeof(UabHookerFrontendPlugin));
 
-            MyUtils.MyLog($"初始化完成: Uab={_replaceUab.Count}, Img={_replaceImg.Sum(kv=>kv.Value.Count)}, SpineImg={_replaceSpineImg.Sum(kv=>kv.Value.Count)}, Spine={_replaceSpine.Count}, Atlas={_sourceAtlas.Count}");
+            MyUtils.MyLog($"初始化完成: Uab={_replaceUab.Count}, Img={_replaceImg.Sum(kv=>kv.Value.Count)}, SpineImg={_replaceSpineImg.Sum(kv=>kv.Value.Count)}, Spine={_replaceSpine.Count}, Avatar={_replaceAvatar.Count}, Atlas={_sourceAtlas.Count}");
 
             // 延迟一帧刷新有效条目，等所有 mod 设置还原完成
             GameApp.Instance.StartCoroutine(DelayedRebuild());
@@ -364,8 +369,30 @@ namespace UabHooker
                 }
             }
 
-            // HookSpine: Spine 完整资源替换（atlas + skel）
+            // HookSpine: Spine 完整资源替换（简单 SkeletonGraphic，atlas + skel）
             foreach (var hook in root.Elements("HookSpine"))
+            {
+                foreach (var spine in hook.Elements("spine"))
+                {
+                    string spineName = (string)spine.Attribute("name") ?? "";
+                    string atlasTo = ResolveToPath((string)spine.Attribute("atlas") ?? "", baseDir);
+                    string skelTo = ResolveToPath((string)spine.Attribute("skel") ?? "", baseDir);
+                    string enableRaw = (string)spine.Attribute("enable") ?? "true";
+                    if (string.IsNullOrEmpty(spineName) || string.IsNullOrEmpty(atlasTo) || string.IsNullOrEmpty(skelTo))
+                        continue;
+
+                    var info = new SpineReplaceInfo { atlasPath = atlasTo, skelPath = skelTo };
+                    info.enableCond = ParseEnableCondition(enableRaw, modIdStr);
+                    if (info.enableCond.type == EnableCondition.CondType.Static && !info.enableCond.staticValue)
+                        continue;
+
+                    _replaceSpine[spineName] = info;
+                    MyUtils.MyLog($"配置[HookSpine] {spineName} -> atlas={atlasTo}, skel={skelTo}");
+                }
+            }
+
+            // HookAvatar: AvatarSpine 完整资源替换（AvatarSkeleton，含 cover/coverKeep）
+            foreach (var hook in root.Elements("HookAvatar"))
             {
                 foreach (var spine in hook.Elements("spine"))
                 {
@@ -389,13 +416,13 @@ namespace UabHooker
                     info.coverAtlasPath = ResolveToPath((string)spine.Attribute("coverAtlas") ?? "", baseDir);
                     info.coverSkelPath = ResolveToPath((string)spine.Attribute("coverSkel") ?? "", baseDir);
 
-                    _replaceSpine[spineName] = info;
+                    _replaceAvatar[spineName] = info;
                     string logExtra = info.coverKeep ? " coverKeep=true" : "";
                     if (!string.IsNullOrEmpty(info.coverAtlasPath))
                         logExtra += " coverAtlas=" + info.coverAtlasPath;
                     if (!string.IsNullOrEmpty(info.coverSkelPath))
                         logExtra += " coverSkel=" + info.coverSkelPath;
-                    MyUtils.MyLog($"配置[HookSpine] {spineName} -> atlas={atlasTo}, skel={skelTo}" + logExtra);
+                    MyUtils.MyLog($"配置[HookAvatar] {spineName} -> atlas={atlasTo}, skel={skelTo}" + logExtra);
                 }
             }
         }
@@ -412,6 +439,7 @@ namespace UabHooker
             ModManager.GetSetting(ModIdStr, "logEntrySpineImg", ref logEntrySpineImg);
             ModManager.GetSetting(ModIdStr, "logEntryAtlas", ref logEntryAtlas);
             ModManager.GetSetting(ModIdStr, "logEntrySpine", ref logEntrySpine);
+            ModManager.GetSetting(ModIdStr, "logEntryAvatar", ref logEntryAvatar);
 
             // 首次启动时延迟重建，等所有 mod 设置还原
             GameApp.Instance.StartCoroutine(DelayedRebuild());
@@ -480,6 +508,12 @@ namespace UabHooker
             foreach (var kv in _replaceSpine)
                 if (kv.Value.enableCond.IsEnabled())
                     _activeSpine[kv.Key] = kv.Value;
+
+            // _replaceAvatar
+            _activeAvatar.Clear();
+            foreach (var kv in _replaceAvatar)
+                if (kv.Value.enableCond.IsEnabled())
+                    _activeAvatar[kv.Key] = kv.Value;
 
             // _sourceAtlas → _activeAtlas
             _activeAtlas.Clear();
@@ -567,23 +601,64 @@ namespace UabHooker
         }
 
 		// ═══════════════════════════════════════════════════════════════
-		//  Hook 3a: AvatarSkeleton.SetupSkeletonGraphic — Spine 完整资源替换
-		//  在 SetupSkeletonGraphic 阶段替换 skeletonDataAsset 参数，比 Hook Initialize
-		//  更干净——SetupSkeletonGraphic 的 isSameAsset 机制能正确处理缓存跳过，
-		//  且动画也从替换后的 Asset 获取，骨骼索引天然匹配
+		//  Hook 3a: SkeletonGraphic.Initialize — Spine 完整资源替换（简单 SkeletonGraphic）
+		//  替换 atlas + skel，强制 overwrite=true 确保 Skeleton + AnimationState 完整重建
+		// ═══════════════════════════════════════════════════════════════
+
+		[HarmonyPrefix]
+		[HarmonyPriority(Priority.HigherThanNormal)]
+		[HarmonyPatch(typeof(SkeletonGraphic), "Initialize", new Type[] { typeof(bool) })]
+		public static void SkeletonGraphic_Pre_Spine(SkeletonGraphic __instance, ref bool overwrite)
+        {
+            if (_activeSpine.Count == 0 || __instance == null) return;
+
+            var sda = __instance.SkeletonDataAsset;
+            if (sda == null) return;
+
+            string sdaName = sda.name;
+            if (string.IsNullOrEmpty(sdaName)) return;
+            if (logEntrySpine) MyUtils.MyLog("[HookSpine] 入口: sda=" + sdaName);
+
+            foreach (var kv in _activeSpine)
+            {
+                if (sdaName.IndexOf(kv.Key, StringComparison.OrdinalIgnoreCase) < 0) continue;
+
+                string cacheKey = kv.Key;
+                var info = kv.Value;
+
+                if (!_spineCache.TryGetValue(cacheKey, out var cached) || cached == null || cached.SkeletonAsset == null)
+                {
+                    if (logEntrySpine) MyUtils.MyLog("[HookSpine] 缓存未命中，加载资源: " + cacheKey);
+                    var newAsset = LoadAndCacheSpineAsset(cacheKey, info.atlasPath, info.skelPath, __instance.material);
+                    if (newAsset == null) continue;
+                    cached = _spineCache[cacheKey];
+                }
+
+                __instance.skeletonDataAsset = cached.SkeletonAsset;
+                __instance.Skeleton = null;
+                Traverse.Create(__instance).Field("state").SetValue(null);
+                overwrite = true;
+                if (logReplace) MyUtils.MyLog("[HookSpine] 替换: [" + kv.Key + "] skeletonDataAsset -> " + cached.SkeletonAsset.name);
+                break;
+            }
+        }
+
+		// ═══════════════════════════════════════════════════════════════
+		//  Hook 3b: AvatarSkeleton.SetupSkeletonGraphic — AvatarSpine 完整资源替换
+		//  在 SetupSkeletonGraphic 阶段替换 skeletonDataAsset 参数，比 Hook Initialize 更干净
 		// ═══════════════════════════════════════════════════════════════
 
 		[HarmonyPrefix]
 		[HarmonyPatch(typeof(AvatarSkeleton), "SetupSkeletonGraphic")]
 		public static void SetupSkeletonGraphic_Pre(ref SkeletonDataAsset skeletonDataAsset)
         {
-            if (_activeSpine.Count == 0 || skeletonDataAsset == null) return;
+            if (_activeAvatar.Count == 0 || skeletonDataAsset == null) return;
 
             string sdaName = skeletonDataAsset.name;
             if (string.IsNullOrEmpty(sdaName)) return;
-            if (logEntrySpine) MyUtils.MyLog("[HookSpine] SetupSkeletonGraphic 入口: sda=" + sdaName);
+            if (logEntryAvatar) MyUtils.MyLog("[HookAvatar] SetupSkeletonGraphic 入口: sda=" + sdaName);
 
-            foreach (var kv in _activeSpine)
+            foreach (var kv in _activeAvatar)
             {
                 if (sdaName.IndexOf(kv.Key, StringComparison.OrdinalIgnoreCase) < 0) continue;
 
@@ -592,106 +667,18 @@ namespace UabHooker
 
                 if (!_spineCache.TryGetValue(cacheKey, out var cached) || cached == null || cached.SkeletonAsset == null)
                 {
-                    if (logEntrySpine) MyUtils.MyLog("[HookSpine] 缓存未命中，加载资源: " + cacheKey);
+                    if (logEntryAvatar) MyUtils.MyLog("[HookAvatar] 缓存未命中，加载资源: " + cacheKey);
 
-                    if (!File.Exists(info.atlasPath)) { MyUtils.MyLog("[HookSpine] atlas 文件不存在: " + info.atlasPath); continue; }
-                    if (!File.Exists(info.skelPath)) { MyUtils.MyLog("[HookSpine] skel 文件不存在: " + info.skelPath); continue; }
+                    // 从原始 asset 提取材质用于创建新 atlas
+                    Material templateMat = GetMaterialFromSda(skeletonDataAsset);
 
-                    string atlasContent;
-                    try { atlasContent = File.ReadAllText(info.atlasPath); }
-                    catch (Exception ex) { MyUtils.MyLog("[HookSpine] 读取 atlas 失败: " + ex.Message); continue; }
-
-                    string atlasDir = Path.GetDirectoryName(info.atlasPath);
-                    var pageFileNames = ParseAtlasPageFileNames(atlasContent);
-                    var textures = new List<Texture2D>();
-                    foreach (var pf in pageFileNames)
-                    {
-                        string pngName = Path.GetFileNameWithoutExtension(pf);
-                        string pngPath = Path.Combine(atlasDir, pf);
-                        if (!File.Exists(pngPath))
-                        {
-                            pngPath = Path.Combine(atlasDir, pngName + ".png");
-                            if (!File.Exists(pngPath)) continue;
-                        }
-                        var tex = new Texture2D(1, 1);
-                        try
-                        {
-                            tex.LoadImage(File.ReadAllBytes(pngPath));
-                            tex.name = pngName;
-                            textures.Add(tex);
-                        }
-                        catch (Exception ex) { MyUtils.MyLog("[HookSpine] 加载贴图失败: " + pngPath + " - " + ex.Message); }
-                    }
-                    if (textures.Count == 0) { MyUtils.MyLog("[HookSpine] 未加载到任何贴图: " + info.atlasPath); continue; }
-
-                    // 从原始 Asset 获取模板材质
-                    Material templateMat = null;
-                    if (skeletonDataAsset != null)
-                    {
-                        var sdaTra = Traverse.Create(skeletonDataAsset);
-                        object atlasAssets = sdaTra.Field("atlasAssets").GetValue();
-                        if (atlasAssets is Array arr && arr.Length > 0)
-                        {
-                            var aa = arr.GetValue(0);
-                            if (aa != null)
-                            {
-                                var pm = Traverse.Create(aa).Property("PrimaryMaterial").GetValue() as Material;
-                                if (pm != null) templateMat = pm;
-                            }
-                        }
-                    }
-
-                    var textAsset = new TextAsset(atlasContent);
-                    SpineAtlasAsset atlasAsset;
-                    try { atlasAsset = SpineAtlasAsset.CreateRuntimeInstance(textAsset, textures.ToArray(), templateMat, true); }
-                    catch (Exception ex) { MyUtils.MyLog("[HookSpine] 创建 SpineAtlasAsset 失败: " + ex.Message); continue; }
-
-                    SkeletonDataAsset skeletonAsset = null;
-                    try
-                    {
-                        if (info.skelPath.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
-                        {
-                            string jsonContent = File.ReadAllText(info.skelPath);
-                            var jsonTextAsset = new TextAsset(jsonContent);
-                            skeletonAsset = SkeletonDataAsset.CreateRuntimeInstance(jsonTextAsset, atlasAsset, false, 0.01f);
-                        }
-                        else
-                        {
-                            var atlas = atlasAsset.GetAtlas();
-                            if (atlas == null) { MyUtils.MyLog("[HookSpine] 获取 Atlas 失败"); continue; }
-                            var binary = new SkeletonBinary(atlas);
-                            binary.Scale = 0.01f;
-                            var skeletonData = binary.ReadSkeletonData(info.skelPath);
-                            skeletonAsset = SkeletonDataAsset.CreateRuntimeInstance(new TextAsset(), atlasAsset, false, 0.01f);
-                            Traverse.Create(skeletonAsset).Field("skeletonData").SetValue(skeletonData);
-                            Traverse.Create(skeletonAsset).Field("stateData").SetValue(new AnimationStateData(skeletonData));
-                        }
-                    }
-                    catch (Exception ex) { MyUtils.MyLog("[HookSpine] 创建 SkeletonDataAsset 失败: " + ex.Message); foreach (var t in textures) UnityEngine.Object.Destroy(t); continue; }
-
-                    skeletonAsset.name = cacheKey;
-
-                    try
-                    {
-                        var verifyData = skeletonAsset.GetSkeletonData(false);
-                        if (verifyData == null) { MyUtils.MyLog("[HookSpine] 验证失败: GetSkeletonData 返回 null"); foreach (var t in textures) UnityEngine.Object.Destroy(t); continue; }
-                    }
-                    catch (Exception ex) { MyUtils.MyLog("[HookSpine] 验证失败: GetSkeletonData 异常 - " + ex.Message); foreach (var t in textures) UnityEngine.Object.Destroy(t); continue; }
-
-                    cached = new SpineCachedAssets
-                    {
-                        AtlasAsset = atlasAsset,
-                        SkeletonAsset = skeletonAsset,
-                        Textures = textures
-                    };
-                    _spineCache[cacheKey] = cached;
-                    if (logEntrySpine) MyUtils.MyLog("[HookSpine] 加载完成并缓存: " + cacheKey);
+                    var newAsset = LoadAndCacheSpineAsset(cacheKey, info.atlasPath, info.skelPath, templateMat);
+                    if (newAsset == null) continue;
+                    cached = _spineCache[cacheKey];
                 }
 
-                // 替换参数中的 skeletonDataAsset，SetupSkeletonGraphic 会用这个替换后的值做后续操作
                 skeletonDataAsset = cached.SkeletonAsset;
-                if (logReplace) MyUtils.MyLog("[HookSpine] SetupSkeletonGraphic 替换: [" + kv.Key + "] skeletonDataAsset -> " + cached.SkeletonAsset.name);
-
+                if (logReplace) MyUtils.MyLog("[HookAvatar] SetupSkeletonGraphic 替换: [" + kv.Key + "] skeletonDataAsset -> " + cached.SkeletonAsset.name);
                 break;
             }
         }
@@ -706,7 +693,7 @@ namespace UabHooker
         [HarmonyPatch(typeof(Game.Components.Avatar.AvatarSkeleton), "Refresh")]
         public static void AvatarSkeleton_Refresh_Post(AvatarSkeleton __instance)
         {
-            if (_activeSpine.Count == 0) return;
+            if (_activeAvatar.Count == 0) return;
 
             // 1. 处理 clothingCover
             try
@@ -715,7 +702,7 @@ namespace UabHooker
                 if (cover != null)
                 {
                     string coverName = cover.skeletonDataAsset?.name ?? "";
-                    foreach (var kv in _activeSpine)
+                    foreach (var kv in _activeAvatar)
                     {
                         if (!coverName.Contains(kv.Key) && !coverName.StartsWith(kv.Key))
                             continue;
@@ -723,10 +710,9 @@ namespace UabHooker
                         var info = kv.Value;
                         string cacheKey = kv.Key + "_cover";
 
-                        // 情况 A: 指定了 coverAtlas/coverSkel → 加载并替换 cover
                         if (!string.IsNullOrEmpty(info.coverAtlasPath) && !string.IsNullOrEmpty(info.coverSkelPath))
                         {
-                            var newAsset = LoadAndCacheSpineAsset(cacheKey, info.coverAtlasPath, info.coverSkelPath);
+                            var newAsset = LoadAndCacheSpineAsset(cacheKey, info.coverAtlasPath, info.coverSkelPath, cover.material);
                             if (newAsset != null)
                             {
                                 cover.skeletonDataAsset = newAsset;
@@ -735,10 +721,9 @@ namespace UabHooker
                                 cover.Initialize(true);
                                 cover.gameObject.SetActive(true);
                                 if (logReplace)
-                                    MyUtils.MyLog("[HookSpine] 替换 clothingCover: " + coverName + " -> " + cacheKey);
+                                    MyUtils.MyLog("[HookAvatar] 替换 clothingCover: " + coverName + " -> " + cacheKey);
                             }
                         }
-                        // 情况 B: 无 coverAtlas/coverSkel
                         else
                         {
                             if (!info.coverKeep)
@@ -747,11 +732,11 @@ namespace UabHooker
                                 {
                                     cover.gameObject.SetActive(false);
                                     if (logReplace)
-                                        MyUtils.MyLog("[HookSpine] 隐藏 clothingCover: " + coverName + " (匹配 " + kv.Key + ")");
+                                        MyUtils.MyLog("[HookAvatar] 隐藏 clothingCover: " + coverName + " (匹配 " + kv.Key + ")");
                                 }
                             }
                             else if (logReplace && cover.gameObject.activeSelf)
-                                MyUtils.MyLog("[HookSpine] 保留 clothingCover: " + coverName + " (coverKeep=true)");
+                                MyUtils.MyLog("[HookAvatar] 保留 clothingCover: " + coverName + " (coverKeep=true)");
                         }
                         break;
                     }
@@ -773,11 +758,11 @@ namespace UabHooker
                 }
                 catch (Exception ex)
                 {
-                    MyUtils.MyLog("[HookSpine] BoneFollower 重绑失败: " + bf.boneName + " - " + ex.Message);
+                    MyUtils.MyLog("[HookAvatar] BoneFollower 重绑失败: " + bf.boneName + " - " + ex.Message);
                 }
             }
             if (bfCount > 0)
-                MyUtils.MyLog("[HookSpine] 刷新后重绑 " + bfCount + " 个 BoneFollowerGraphic");
+                MyUtils.MyLog("[HookAvatar] 刷新后重绑 " + bfCount + " 个 BoneFollowerGraphic");
 
             // 3. 记录所有 SkeletonGraphic 的位置，供调试
             var sgs = __instance.GetComponentsInChildren<SkeletonGraphic>(true);
@@ -788,28 +773,27 @@ namespace UabHooker
                 var ap = sg.rectTransform.anchoredPosition;
                 if (sgName.Contains("menpai") || sgName.Contains("hair") || sgName.Contains("eye"))
                 {
-                    MyUtils.MyLog($"[HookSpine] 位置: [{sgName}] anchoredPos=({ap.x:F1},{ap.y:F1}) localScale=({sg.transform.localScale.x:F3})");
+                    MyUtils.MyLog($"[HookAvatar] 位置: [{sgName}] anchoredPos=({ap.x:F1},{ap.y:F1}) localScale=({sg.transform.localScale.x:F3})");
                 }
             }
 
             // 4. 检查 partGroupConfigurations 中的 hair 相关 RectTransform
             try
             {
-                // 通过 Traverse 获取 AvatarSkeleton 的私有字段
                 var tra = Traverse.Create(__instance);
                 var backHairRT = tra.Field("backHairPosition").GetValue<RectTransform>();
                 var frontHairRT = tra.Field("frontHairPosition").GetValue<RectTransform>();
                 if (backHairRT != null)
-                    MyUtils.MyLog($"[HookSpine] backHairPosition: anchoredPos=({backHairRT.anchoredPosition.x:F1},{backHairRT.anchoredPosition.y:F1})");
+                    MyUtils.MyLog($"[HookAvatar] backHairPosition: anchoredPos=({backHairRT.anchoredPosition.x:F1},{backHairRT.anchoredPosition.y:F1})");
                 if (frontHairRT != null)
-                    MyUtils.MyLog($"[HookSpine] frontHairPosition: anchoredPos=({frontHairRT.anchoredPosition.x:F1},{frontHairRT.anchoredPosition.y:F1})");
+                    MyUtils.MyLog($"[HookAvatar] frontHairPosition: anchoredPos=({frontHairRT.anchoredPosition.x:F1},{frontHairRT.anchoredPosition.y:F1})");
 
                 var headInner = tra.Field("skeletonHeadInnerPosition").GetValue<RectTransform>();
                 var headOuter = tra.Field("skeletonHeadOuterPosition").GetValue<RectTransform>();
                 if (headInner != null)
-                    MyUtils.MyLog($"[HookSpine] headInner: anchoredPos=({headInner.anchoredPosition.x:F1},{headInner.anchoredPosition.y:F1})");
+                    MyUtils.MyLog($"[HookAvatar] headInner: anchoredPos=({headInner.anchoredPosition.x:F1},{headInner.anchoredPosition.y:F1})");
                 if (headOuter != null)
-                    MyUtils.MyLog($"[HookSpine] headOuter: anchoredPos=({headOuter.anchoredPosition.x:F1},{headOuter.anchoredPosition.y:F1})");
+                    MyUtils.MyLog($"[HookAvatar] headOuter: anchoredPos=({headOuter.anchoredPosition.x:F1},{headOuter.anchoredPosition.y:F1})");
             }
             catch { }
         }
@@ -845,7 +829,7 @@ namespace UabHooker
 		// ═══════════════════════════════════════════════════════════════
 
 		[HarmonyPrefix]
-		[HarmonyPatch(typeof(SkeletonGraphic), "Initialize")]
+		[HarmonyPatch(typeof(SkeletonGraphic), "Initialize", new Type[] { typeof(bool) })]
 		public static void SkeletonGraphic_Pre(SkeletonGraphic __instance)
         {
             if (_activeSpineImg.Count == 0 || __instance == null) { if (logEntrySpineImg) MyUtils.MyLog("[HookSpineImg] 入口: cnt=0/null"); return; }
@@ -980,9 +964,33 @@ namespace UabHooker
         // ═══════════════════════════════════════════════════════════════
 
         /// <summary>
+        /// 从 SkeletonDataAsset 中提取模板材质
+        /// </summary>
+        private static Material GetMaterialFromSda(SkeletonDataAsset sda)
+        {
+            if (sda == null) return null;
+            try
+            {
+                var sdaTra = Traverse.Create(sda);
+                object atlasAssets = sdaTra.Field("atlasAssets").GetValue();
+                if (atlasAssets is Array arr && arr.Length > 0)
+                {
+                    var aa = arr.GetValue(0);
+                    if (aa != null)
+                    {
+                        var pm = Traverse.Create(aa).Property("PrimaryMaterial").GetValue() as Material;
+                        if (pm != null) return pm;
+                    }
+                }
+            }
+            catch { }
+            return null;
+        }
+
+        /// <summary>
         /// 从文件加载 Spine 资源并缓存，返回 SkeletonDataAsset
         /// </summary>
-        private static SkeletonDataAsset LoadAndCacheSpineAsset(string cacheKey, string atlasPath, string skelPath)
+        private static SkeletonDataAsset LoadAndCacheSpineAsset(string cacheKey, string atlasPath, string skelPath, Material templateMat = null)
         {
             if (_spineCache.TryGetValue(cacheKey, out var cached) && cached != null && cached.SkeletonAsset != null)
                 return cached.SkeletonAsset;
@@ -1019,7 +1027,7 @@ namespace UabHooker
 
             var textAsset = new TextAsset(atlasContent);
             SpineAtlasAsset atlasAsset;
-            try { atlasAsset = SpineAtlasAsset.CreateRuntimeInstance(textAsset, textures.ToArray(), (Material)null, true); }
+            try { atlasAsset = SpineAtlasAsset.CreateRuntimeInstance(textAsset, textures.ToArray(), templateMat, true); }
             catch (Exception ex) { MyUtils.MyLog("[HookSpine] 创建 SpineAtlasAsset 失败: " + ex.Message); return null; }
 
             SkeletonDataAsset skeletonAsset = null;
