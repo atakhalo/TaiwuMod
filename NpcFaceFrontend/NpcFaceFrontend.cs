@@ -1374,7 +1374,7 @@ namespace NpcFace
 			var n = avatarAssetName.Split('$');
 			if(n.Length > 1)
 			{
-				avatar.RefreshAsSpine($"NpcFace/{n[1]}", "");
+				avatar.RefreshAsSpine($"{n[1]}", "");
 				return true;
 			}
 			// 走原加载逻辑
