@@ -280,6 +280,8 @@ namespace NpcFace
 			public List<string> altas;
 			public string skinName;
 			public string animName;
+			public int idleRepeat = 0; // 播多少次 idle anim 后播 actionAnim，0=连续循环
+			public string actionAnim = ""; // idleRepeat 次后播放的动作动画
 			public Dictionary<string, string> attachments;
 			public float scaleBig = 1.0f;
 			public float scaleNormal = 0.5f;
@@ -1381,6 +1383,8 @@ namespace NpcFace
 
 			sc.skinName = doc.Descendants("skin").FirstOrDefault()?.Value ?? "";
 			sc.animName = doc.Descendants("anim").FirstOrDefault()?.Value ?? "";
+			sc.idleRepeat = int.Parse(doc.Descendants("idleRepeat").FirstOrDefault()?.Value ?? "0");
+			sc.actionAnim = doc.Descendants("actionAnim").FirstOrDefault()?.Value ?? "";
 			sc.scaleBig = float.Parse(doc.Descendants("scaleBig").FirstOrDefault()?.Value ?? "1");
 			sc.scaleNormal = float.Parse(doc.Descendants("scaleNormal").FirstOrDefault()?.Value ?? "0.5");
 			sc.scaleSmall = float.Parse(doc.Descendants("scaleSmall").FirstOrDefault()?.Value ?? "1");
@@ -1755,6 +1759,26 @@ namespace NpcFace
 				npcSkeleton.transform.localScale = Vector3.one * spineScale;
 				if(!npcSkeleton.gameObject.activeSelf)
 					npcSkeleton.gameObject.SetActive(true);
+
+				// 检查动画是否改变，变了则更新
+				var targetAnim = spineConfig.animName;
+				if (string.IsNullOrEmpty(targetAnim))
+				{
+					var sd = npcSkeleton.skeletonDataAsset?.GetSkeletonData(false);
+					if (sd != null && sd.Animations.Count > 0)
+						targetAnim = sd.Animations.Items[0].Name;
+				}
+				if (!string.IsNullOrEmpty(targetAnim) && npcSkeleton.AnimationState != null)
+				{
+					var currentTrack = npcSkeleton.AnimationState.GetCurrent(0);
+					bool animMatch = currentTrack != null && currentTrack.Animation.Name == targetAnim;
+					// 轮播模式下，当前播 actionAnim 也算匹配，不重置循环
+					if (!animMatch && spineConfig.idleRepeat > 0 && !string.IsNullOrEmpty(spineConfig.actionAnim))
+						animMatch = currentTrack != null && currentTrack.Animation.Name == spineConfig.actionAnim;
+					if (!animMatch)
+						PlayAnimCycle(npcSkeleton, targetAnim, spineConfig.idleRepeat, spineConfig.actionAnim);
+				}
+
 				// 应用附件
 				// ApplySpineAttachments(npcSkeleton, spineConfig);
 				// 应用偏移（使用 Traverse 调用私有方法）
@@ -1763,28 +1787,29 @@ namespace NpcFace
 			}
 			else
 			{
-				avatar.ResetToBlank(false); // 重置到空白状态，清除旧的头像部件精灵
+				if(!isSameSpine)
+					avatar.ResetToBlank(false); // 重置到空白状态，清除旧的头像部件精灵
 
 				// 设置 spine 数据到 SkeletonGraphic
-				npcSkeleton.skeletonDataAsset = asset;
-				npcSkeleton.initialSkinName = skinName;
-				npcSkeleton.Initialize(true);
-				npcSkeleton.UnscaledTime = true;
+				if (!isSameSpine || npcSkeleton.skeletonDataAsset != asset)
+				{
+					npcSkeleton.skeletonDataAsset = asset;
+					npcSkeleton.initialSkinName = skinName;
+					npcSkeleton.Initialize(true);
+					npcSkeleton.UnscaledTime = true;
+				}
 
 				// 播放动画
 				var skelData = asset.GetSkeletonData(false);
 				var animations = skelData.Animations;
 				if (animations.Count > 0)
 				{
-
 					if(spineConfig.animName != "")
-					{
 						npcSkeleton.startingAnimation = spineConfig.animName;
-					}
 					else
 						npcSkeleton.startingAnimation = animations.Items[0].Name;
 					if (npcSkeleton.AnimationState != null)
-						npcSkeleton.AnimationState.SetAnimation(0, npcSkeleton.startingAnimation, true);
+						PlayAnimCycle(npcSkeleton, npcSkeleton.startingAnimation, spineConfig.idleRepeat, spineConfig.actionAnim);
 				}
 
 				// 应用附件
@@ -1845,6 +1870,56 @@ namespace NpcFace
 					MyUtils.MyLog($"SetAttachment failed slot={slotName} attach={attachName}: {ex.Message}");
 				}
 			}
+		}
+
+		/// <summary>
+		/// 在 SkeletonGraphic 上播放动画循环。
+		/// idleRepeat=0 或 actionAnim="" 时：连续循环 animName
+		/// idleRepeat>0 且 actionAnim!="" 时：animName 播放 idleRepeat 次 → actionAnim 1 次 → 重复
+		/// </summary>
+		private static void PlayAnimCycle(SkeletonGraphic npcSkeleton, string animName, int idleRepeat, string actionAnim)
+		{
+			if (npcSkeleton == null || npcSkeleton.AnimationState == null) return;
+
+			if (idleRepeat <= 0 || string.IsNullOrEmpty(actionAnim))
+			{
+				// 连续循环原动画
+				npcSkeleton.AnimationState.SetAnimation(0, animName, true);
+			}
+			else
+			{
+				// 启动 idle→action 循环，从第 1 次 idle 开始
+				PlayIdleInCycle(npcSkeleton, animName, idleRepeat, actionAnim, 1);
+			}
+		}
+
+		/// <summary>
+		/// 在 idle→action 循环中播一次 idle
+		/// </summary>
+		private static void PlayIdleInCycle(SkeletonGraphic npcSkeleton, string animName, int idleRepeat, string actionAnim, int count)
+		{
+			if (npcSkeleton == null || npcSkeleton.AnimationState == null) return;
+
+			var track = npcSkeleton.AnimationState.SetAnimation(0, animName, false);
+			track.Complete += (entry) =>
+			{
+				if (npcSkeleton == null || npcSkeleton.AnimationState == null) return;
+				if (count < idleRepeat)
+				{
+					// 继续播 idle
+					PlayIdleInCycle(npcSkeleton, animName, idleRepeat, actionAnim, count + 1);
+				}
+				else
+				{
+					// idle 播够了，播一次 actionAnim，播完重启循环
+					var actionTrack = npcSkeleton.AnimationState.SetAnimation(0, actionAnim, false);
+					actionTrack.Complete += (entry2) =>
+					{
+						if (npcSkeleton == null || npcSkeleton.AnimationState == null) return;
+						PlayIdleInCycle(npcSkeleton, animName, idleRepeat, actionAnim, 1);
+					};
+				}
+			};
 		}
 
 		/// <summary>
