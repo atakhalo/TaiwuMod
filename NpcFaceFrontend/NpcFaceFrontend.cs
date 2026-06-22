@@ -1502,7 +1502,126 @@ namespace NpcFace
 		}
 
 		/// <summary>
+		/// 检测 atlas 文本中是否包含 pma:true（预乘Alpha）
+		/// 兼容 "pma: true"（带空格）和 "pma:true"（无空格）两种写法
+		/// </summary>
+		private static bool HasPmaInAtlas(string atlasContent)
+		{
+			foreach (var line in atlasContent.Split('\n'))
+			{
+				var trimmed = line.Trim();
+				// 移除 pma: 后的空格再比较
+				if (trimmed.StartsWith("pma:") && trimmed.Substring(4).Trim() == "true")
+					return true;
+			}
+			return false;
+		}
+
+		/// <summary>
+		/// 从 atlas 文本中移除 pma 设置行
+		/// </summary>
+		private static string RemovePmaFromAtlas(string atlasContent)
+		{
+			var lines = atlasContent.Split('\n');
+			return string.Join("\n", lines.Where(l => !l.Trim().StartsWith("pma:")));
+		}
+
+		/// <summary>
+		/// 将预乘Alpha纹理转换为直通Alpha纹理（RGB /= A）
+		/// </summary>
+		private static void ConvertPremultipliedToStraightAlpha(Texture2D texture)
+		{
+			var pixels = texture.GetPixels();
+			for (int i = 0; i < pixels.Length; i++)
+			{
+				var p = pixels[i];
+				if (p.a > 0f)
+				{
+					p.r = Mathf.Clamp01(p.r / p.a);
+					p.g = Mathf.Clamp01(p.g / p.a);
+					p.b = Mathf.Clamp01(p.b / p.a);
+				}
+				pixels[i] = p;
+			}
+			texture.SetPixels(pixels);
+			texture.Apply();
+		}
+
+		/// <summary>
+		/// 颜色扩张（alpha bleed）：对 a=0 且 RGB=0 的透明像素，
+		/// 在逐层扩张的方形环中查找最近的非透明像素，取其 RGB 平均值填充。
+		/// 防止 GPU 双线性采样时透明边缘与黑色混合出黑边。
+		/// 对所有纹理（无论是否 PMA）都可安全使用。
+		/// </summary>
+		private static void ApplyAlphaBleed(Texture2D texture)
+		{
+			var pixels = texture.GetPixels();
+			int w = texture.width;
+			int h = texture.height;
+			int radius = Mathf.Max(1, Mathf.Min(w, h) / 256 + 1);
+			int bleedCount = 0;
+
+			for (int y = 0; y < h; y++)
+			{
+				for (int x = 0; x < w; x++)
+				{
+					int idx = y * w + x;
+					if (pixels[idx].a > 0f) continue;
+					if (pixels[idx].r > 0f || pixels[idx].g > 0f || pixels[idx].b > 0f) continue;
+
+					Color acc = Color.black;
+					int count = 0;
+					for (int r = 1; r <= radius; r++)
+					{
+						for (int dx = -r; dx <= r; dx++)
+						{
+							TryBleedSample(pixels, w, h, x + dx, y - r, ref acc, ref count);
+							TryBleedSample(pixels, w, h, x + dx, y + r, ref acc, ref count);
+						}
+						for (int dy = -r + 1; dy <= r - 1; dy++)
+						{
+							TryBleedSample(pixels, w, h, x - r, y + dy, ref acc, ref count);
+							TryBleedSample(pixels, w, h, x + r, y + dy, ref acc, ref count);
+						}
+						if (count > 0)
+							break;
+					}
+					if (count > 0)
+					{
+						pixels[idx].r = acc.r / count;
+						pixels[idx].g = acc.g / count;
+						pixels[idx].b = acc.b / count;
+						bleedCount++;
+					}
+				}
+			}
+
+			texture.SetPixels(pixels);
+			texture.Apply();
+
+			if (bleedCount > 0)
+				MyUtils.MyLog($"Alpha bleed 处理了 {bleedCount} 个透明像素");
+		}
+
+		/// <summary>
+		/// 辅助：如果目标像素为非透明则累加颜色
+		/// </summary>
+		private static void TryBleedSample(Color[] pixels, int w, int h, int x, int y, ref Color acc, ref int count)
+		{
+			if (x < 0 || x >= w || y < 0 || y >= h) return;
+			int i = y * w + x;
+			if (pixels[i].a > 0f)
+			{
+				acc.r += pixels[i].r;
+				acc.g += pixels[i].g;
+				acc.b += pixels[i].b;
+				count++;
+			}
+		}
+
+		/// <summary>
 		/// 加载图集：读取 .atlas 文本和 .png 纹理，创建 SpineAtlasAsset
+		/// 自动检测并处理预乘Alpha（pma: true）的图集
 		/// </summary>
 		private static bool TryLoadSpineAtlas(TaiwuAvatar avatar, SpineConfig spineConfig, string atlasPath, 
 			out SpineAtlasAsset atlasAsset, out Atlas atlas, out List<Texture2D> createdTextures)
@@ -1511,7 +1630,11 @@ namespace NpcFace
 			atlas = null;
 			createdTextures = new List<Texture2D>();
 			string atlasContent = File.ReadAllText(atlasPath);
-			var textAsset = new TextAsset(atlasContent);
+
+			// 检测是否需要处理预乘Alpha
+			bool hasPma = HasPmaInAtlas(atlasContent);
+			if (hasPma)
+				MyUtils.MyLog("检测到预乘Alpha图集，将转换为直通Alpha");
 
 			for (int i = 0; i < spineConfig.altas.Count; i++)
 			{
@@ -1522,14 +1645,31 @@ namespace NpcFace
 				Texture2D texture = new Texture2D(1, 1);
 				texture.LoadImage(pngBytes);
 				texture.name = item;
+
+				// 如果 atlas 标记了 pma:true，将纹理从预乘Alpha转换为直通Alpha
+				if (hasPma)
+					ConvertPremultipliedToStraightAlpha(texture);
+
+				// 对所有纹理做颜色扩张，防止透明边缘与黑色混合出黑边
+				ApplyAlphaBleed(texture);
+
 				createdTextures.Add(texture);
 			}
+
+			// 如果有预乘Alpha标记，从 atlas 文本中移除 pma 行
+			if (hasPma)
+			{
+				atlasContent = RemovePmaFromAtlas(atlasContent);
+				MyUtils.MyLog("已移除 atlas 中的 pma 标记并转换纹理");
+			}
+
+			var textAsset = new TextAsset(atlasContent);
 
 			// 从 avatar 的 npcSkeleton 克隆材质
 			var npcSkeleton = Traverse.Create(avatar).Field("npcSkeleton").GetValue<SkeletonGraphic>();
 			UnityEngine.Material templateMat = npcSkeleton.material;
 
-			atlasAsset = SpineAtlasAsset.CreateRuntimeInstance(textAsset, createdTextures.ToArray(), templateMat, true);
+			atlasAsset = SpineAtlasAsset.CreateRuntimeInstance(textAsset, createdTextures.ToArray(), templateMat, initialize:true);
 			atlas = atlasAsset.GetAtlas();
 
 			// MyUtils.MyLog($"TryLoadSpineAtlas: success {Path.GetFileName(atlasPath)}");
