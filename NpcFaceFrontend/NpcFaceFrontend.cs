@@ -42,6 +42,7 @@ using Spine.Unity;
 using TaiwuAvatar = Game.Components.Avatar.Avatar;
 using TaiwuAvatarSize = Game.Components.Avatar.AvatarSize;
 using System.Xml.Linq;
+using GameData.Domains.Character.Creation;
 
 namespace NpcFace
 {
@@ -494,34 +495,40 @@ namespace NpcFace
 		/// <summary>
 		/// 创建 mod 普通npc配置文件
 		/// </summary>
-		public static void TryCreateFile()
+		public void TryCreateFile()
         {
             if(toCreateFile)
             {
-                var dirPath = ModManager.GetModRootFolder();
-                var filePath = Path.Combine(dirPath, "太吾迎娇(npc立绘)", "npcFace.txt");
+				ModInfo modInfo = ModManager.LocalMods[ModIdStr];
+				var filePath = Path.Combine(modInfo.DirectoryName, "npcFace.txt");
                 if (!File.Exists(filePath)) {
                     var str1 = $"// 说明:1. 首行跳过； 2. 格式:名字,资源名;（即英文逗号分隔，英文分号结尾）3. 资源名在mod的下载目录下找 C:\\Program Files (x86)\\Steam\\steamapps\\workshop\\content\\838350\\3593734737\\npcName.txt\n";
                     var str2 = $"我是示例,NpcFace_yingjiao;\n";
                     var s = str1 + str2;
                     File.WriteAllText(filePath, s, System.Text.Encoding.UTF8);
-                    //MyLog($"创建 {filePath} npcFace.txt");
+                    MyUtils.MyLog($"创建 npcFace.txt： {filePath}");
                 }
-            }
-        }
+				else
+				{
+					MyUtils.MyLog($"已存在 npcFace.txt，不再创建： {filePath}");
+				}
+			}
+		}
 
 		/// <summary>
 		/// 创建 mod 普通npc配置文件
 		/// </summary>
-		public static void TryReadFile()
+		public void TryReadFile()
         {
             if (toReadFile)
             {
-                var dirPath = ModManager.GetModRootFolder();
-                var filePath = Path.Combine(dirPath, "太吾迎娇(npc立绘)", "npcFace.txt");
-                if (File.Exists(filePath))
+				ModInfo modInfo = ModManager.LocalMods[ModIdStr];
+				var filePath = Path.Combine(modInfo.DirectoryName, "npcFace.txt");
+				if (File.Exists(filePath))
                 {
-                    var s = File.ReadAllLines(filePath, System.Text.Encoding.UTF8);
+					MyUtils.MyLog($"尝试读取 npcFace.txt {filePath}");
+					var s = File.ReadAllLines(filePath, System.Text.Encoding.UTF8);
+					var nCount = 0;
                     for (int i = 0; i < s.Length; i++)
                     {
                         if (i == 0) continue;
@@ -533,11 +540,17 @@ namespace NpcFace
                             var n = r[0].Trim();
                             var res = r[1].Split(';')[0].Trim();
                             npcRes[n] = res;
-                            //MyLog($"读取 npcFace.txt {n} {res}");
-                        }
+							nCount += 1;
+							MyUtils.MyLog($"读取 npcFace.txt {n} {res}");
+						}
                     }
-                }
-            }
+					MyUtils.MyLog($"读取 npcFace.txt 完毕，共{nCount}位");
+				}
+				else
+				{
+					MyUtils.MyLog($"读取 npcFace.txt 失败，文件不存在该路径： {filePath}");
+				}
+			}
         }
 
 		#region 使用id进行查找（ 不使用了）
@@ -630,7 +643,24 @@ namespace NpcFace
         }
 		#endregion
 
-		# region 使用 name 进行查找 (泛用性较高)
+		#region 使用 name 进行查找 (泛用性较高)
+		/// <summary>
+		/// 根据Id 从 id姓名缓存中拿 姓名进行匹配
+		/// </summary>
+		public static bool TrySetNpcFaceByIdName(TaiwuAvatar avatar, CharacterAvatar? instance, int charId)
+		{
+			if (avatar == null) return false;
+			if (idNameCache.TryGetValue(charId, out var curName))
+			{
+				if (curName != "")
+				{
+					if (npcRes.ContainsKey(curName))
+						return resLoad(avatar, instance, isTaiwu: false, npcRes[curName]);
+				}
+			}
+			return false;
+		}
+
 		/// <summary>
 		/// 根据接口信息 中的 name 尝试设置 普通npc  立绘
 		/// </summary>
@@ -1071,19 +1101,6 @@ namespace NpcFace
 			return;
 		}
 
-		// [HarmonyPrefix, HarmonyPatch(typeof(TaiwuAvatar), "ShowNormalState")]
-		// public static bool ShowNormalState_Pre(TaiwuAvatar __instance)
-		// {
-		// 	if(__instance.gameObject == null) return false;
-		// 	return true;
-		// 	var ac = Traverse.Create(__instance).Field("avatarContainer").GetValue<GameObject>();
-		// 	if(ac) ac.SetActive(true);
-		// 	else {MyUtils.MyLog("没有ac"); MyUtils.ShowMono(__instance.gameObject);}
-		// 	var gc = Traverse.Create(__instance).Field("gravestoneContainer").GetValue<GameObject>();
-		// 	if(gc) gc.SetActive(false);
-		// 	else { MyUtils.MyLog("没有gc"); MyUtils.ShowMono(__instance.gameObject); }
-		// }
-
 		// 关系界面 主体
 		// [HarmonyPostfix, HarmonyPatch(typeof(TaiwuAvatar), "Refresh", argumentTypes: new Type[1] { typeof(AvatarRelatedData) })]
 		public static bool OnRefreshChar_Related(TaiwuAvatar __instance, AvatarRelatedData relatedData)
@@ -1091,21 +1108,31 @@ namespace NpcFace
             if (!npcFace) return false;
 			//MyLog("OnRefreshCharRelated");
 			return TrySetNpcFaceByName(__instance, null, relatedData);
-			// DelayCall(__instance, relatedData);
         }
 
-		// public static void DelayCall(TaiwuAvatar avatar, AvatarRelatedData relatedData)
-		// {
-		//     //Game.Instance.StartCoroutine(DelayCoroutine(TrySetNpcFace, 0, avatar, null, relatedData));
-		//     GameApp.Instance.StartCoroutine(DelayCoroutine(TrySetNpcFaceByName, 0, avatar, null, relatedData));
-		// }
+		[HarmonyPrefix, HarmonyPatch(typeof(TaiwuAvatar), "Refresh", argumentTypes: new Type[2] { typeof(AvatarRelatedData), typeof(short) })]
+		public static bool OnRefreshChar_Related_Pre(TaiwuAvatar __instance, AvatarRelatedData relatedData, short characterTemplateId)
+		{
+			if (!npcFace) return true;
+			CharacterItem characterItem = Config.Character.Instance[characterTemplateId];
+			if (!CreatingType.IsFixedPresetType(characterItem.CreatingType)) // 放行到普通refresh
+				return true;
 
-		// private static IEnumerator DelayCoroutine(Func<TaiwuAvatar, CharacterAvatar, AvatarRelatedData, bool> action, float delay, TaiwuAvatar avatar, CharacterAvatar instance, AvatarRelatedData relatedData)
-		// {
-		//     yield return null;
-		//     //yield return new WaitForSeconds(delay);
-		//     action?.Invoke(avatar, instance, relatedData);
-		// }
+			// MyUtils.MyLog($"OnRefreshChar_Related_Pre {characterItem.GivenName} {characterItem.FixedAvatarName}");
+
+			// 对于特殊npc，进行特殊处理, 可以用立绘名
+			var curName = characterItem.GivenName;
+			var npcFaceName = characterItem.FixedAvatarName;
+			if (npcRes.ContainsKey(curName))
+				return !resLoad(__instance, null, isTaiwu: false, npcRes[curName]);
+			else if(npcFaceName != null && npcRes.ContainsKey(npcFaceName))
+				return !resLoad(__instance, null, isTaiwu: false, npcRes[npcFaceName]);
+			else
+			{
+				return true;
+			}
+		}
+
 
 		[HarmonyPrefix, HarmonyPatch(typeof(CharacterAvatar), "FillElement")]
 		public static bool FillElement_Pre(CharacterAvatar __instance)
@@ -1114,7 +1141,8 @@ namespace NpcFace
 			var avatar = Traverse.Create(__instance).Field("_avatar").GetValue<TaiwuAvatar>();
 			QuickCheckNoInit(avatar, out var tobreak);
 			if (tobreak) return false;
-			GameApp.Instance.StartCoroutine(DelayCoroutine_FillElement(FillElement_Wrapper, 0, __instance));
+			FillElement_Wrapper(__instance);
+			// GameApp.Instance.StartCoroutine(DelayCoroutine_FillElement(FillElement_Wrapper, 0, __instance));
 			return false;
 		}
 		private static IEnumerator DelayCoroutine_FillElement(Func<CharacterAvatar, bool> action, float delay, CharacterAvatar avatar)
@@ -1153,27 +1181,10 @@ namespace NpcFace
             }
             else
             {
-                var avatar = Traverse.Create(__instance).Field("_avatar").GetValue<TaiwuAvatar>();
-                return TrySetNpcFaceByName(avatar, __instance, relatedData: null);
-                // DelayCall2(avatar, __instance, null);
+				var avatar = Traverse.Create(__instance).Field("_avatar").GetValue<TaiwuAvatar>();
+				return TrySetNpcFaceByIdName(avatar, __instance, __instance.CharacterId);
             }
         }
-
-        // public static void DelayCall2(TaiwuAvatar avatar, CharacterAvatar instance, AvatarRelatedData relatedData)
-        // {
-        //     //Game.Instance.StartCoroutine(DelayCoroutine(TrySetNpcFace, 0, avatar, null, relatedData));
-        //     GameApp.Instance.StartCoroutine(DelayCoroutine2(TrySetNpcFaceByName, avatar, instance, relatedData));
-        // }
-
-        // private static IEnumerator DelayCoroutine2(Func<TaiwuAvatar, CharacterAvatar, AvatarRelatedData, bool> action, TaiwuAvatar avatar, CharacterAvatar instance, AvatarRelatedData relatedData)
-        // {
-        //     yield return new WaitForSecondsRealtime(0);
-        //     if (avatar == null || instance == null) yield break;
-        //     if (!action.Invoke(avatar, instance, relatedData)) { try { FillElementOrigin(instance); } catch { } }
-        //     yield return new WaitForSecondsRealtime(0.05f);
-        //     if (avatar == null || instance == null) yield break;
-        //     if (!action.Invoke(avatar, instance, relatedData)) { try { FillElementOrigin(instance); } catch { } }
-        // }
 
 
 
@@ -1190,7 +1201,12 @@ namespace NpcFace
 		}
 
 		#region 资源加载
-        private static bool resLoad(TaiwuAvatar avatar, CharacterAvatar? instance, bool isTaiwu, string res=null)
+		/// <summary>
+		/// 太吾： resLoad(avatar, __instance, isTaiwu: true);
+		/// npc： resLoad(avatar, instance, isTaiwu: false, npcRes[curName]);
+		/// 加载成功返回 true
+		/// </summary>
+		private static bool resLoad(TaiwuAvatar avatar, CharacterAvatar? instance, bool isTaiwu, string res=null)
         {
             if (!npcFace) return false;
             if (isTaiwu && !forTaiwu) return false;
