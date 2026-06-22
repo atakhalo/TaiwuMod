@@ -942,16 +942,18 @@ namespace UabHooker
                         continue;
                     }
                     var sprite = Sprite.Create(tex, new Rect(0, 0, tex.width, tex.height), new Vector2(0.5f, 0.5f));
-                    sprite.name = spriteName;
+                    sprite.name = spriteName; // 注意sprite都是用原名，判断替换成功看贴图名
                     image.sprite = sprite;
-                    if (info.w > 0 && info.h > 0)
+
+					if (info.w > 0 && info.h > 0)
                         image.rectTransform.sizeDelta = new Vector2(info.w, info.h);
                     else if (image.AutoSize)
                         image.SetNativeSize();
                     if (info.hasPos)
                         image.rectTransform.anchoredPosition = new Vector2(info.posX, info.posY);
-                    image.SetEnabled(true);
-                    __result = true;
+					image.OnSpriteChange?.Invoke();
+
+					__result = true;
                     if (logReplace) MyUtils.MyLog("[HookAtlas] SetImageSpriteOnly 替换: " + spriteName + " -> " + info.filePath + (info.w > 0 ? $" ({info.w}x{info.h})" : "") + (info.hasPos ? $" pos({info.posX},{info.posY})" : ""));
                     return false;
                 }
