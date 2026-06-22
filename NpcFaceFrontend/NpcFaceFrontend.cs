@@ -264,6 +264,7 @@ namespace NpcFace
 		public static Dictionary<int, string> idNameCache = new Dictionary<int, string>(); // 对一些id 跟 name进行缓存
 
 		public static Dictionary<string, int> ImgTemplate = new Dictionary<string, int>(); // npc模板id缓存
+		public static Dictionary<string, int> spineTemplate = new Dictionary<string, int>(); // npc模板id缓存
 
 		public static bool samllSpine = false;
 
@@ -438,8 +439,10 @@ namespace NpcFace
 			for (int i = 0; i < _dataArray.Count; i++)
 			{
 				if(string.IsNullOrEmpty(_dataArray[i].FixedAvatarName)) continue;
-				if(!ImgTemplate.ContainsKey(_dataArray[i].FixedAvatarName))
+				if(_dataArray[i].FixedAvatarName != null && !ImgTemplate.ContainsKey(_dataArray[i].FixedAvatarName))
 					ImgTemplate[_dataArray[i].FixedAvatarName] = _dataArray[i].TemplateId;
+				if (_dataArray[i].FixedAvatarSpineName != null && !spineTemplate.ContainsKey(_dataArray[i].FixedAvatarSpineName))
+					spineTemplate[_dataArray[i].FixedAvatarSpineName] = _dataArray[i].TemplateId;
 			}
 		}
 
@@ -1030,6 +1033,7 @@ namespace NpcFace
 		public static bool OnRefreshChar_Dis_Pre(TaiwuAvatar __instance, CharacterDisplayData displayData, bool isShowGrave)
 		{
 			if (!npcFace) return true;
+			// MyUtils.MyLog($"OnRefreshChar_Dis_Pre");
 			QuickCheckNoInit(__instance, out var tobreak);
 			if(tobreak) return false;
 			GameApp.Instance.StartCoroutine(DelayCoroutine_OnRefreshChar_Dis(OnRefreshChar_Dis_Wrapper, 0, __instance, displayData, isShowGrave));
@@ -1074,6 +1078,7 @@ namespace NpcFace
 		public static bool OnRefreshChar_Related_Pre(TaiwuAvatar __instance, AvatarRelatedData relatedData)
 		{
 			if (!npcFace) return true;
+			// MyUtils.MyLog("OnRefreshChar_Related_Pre");
 			QuickCheckNoInit(__instance, out var tobreak);
 			if (tobreak) return false;
 			GameApp.Instance.StartCoroutine(DelayCoroutine_OnRefreshChar_Related(OnRefreshChar_Related_Wrapper, 0, __instance, relatedData));
@@ -1115,10 +1120,9 @@ namespace NpcFace
 		{
 			if (!npcFace) return true;
 			CharacterItem characterItem = Config.Character.Instance[characterTemplateId];
+			// MyUtils.MyLog($"OnRefreshChar_Related_Pre  tem {characterItem.GivenName} {characterItem.FixedAvatarName}, {CreatingType.IsFixedPresetType(characterItem.CreatingType)}");
 			if (!CreatingType.IsFixedPresetType(characterItem.CreatingType)) // 放行到普通refresh
 				return true;
-
-			// MyUtils.MyLog($"OnRefreshChar_Related_Pre {characterItem.GivenName} {characterItem.FixedAvatarName}");
 
 			// 对于特殊npc，进行特殊处理, 可以用立绘名
 			var curName = characterItem.GivenName;
@@ -1134,9 +1138,42 @@ namespace NpcFace
 		}
 
 
+		/// <summary>
+		/// hook 直接走动态立绘的
+		/// </summary>
+		[HarmonyPrefix, HarmonyPatch(typeof(TaiwuAvatar), "RefreshAsSpine")]
+		public static bool RefreshAsSpine_Pre(TaiwuAvatar __instance, string spineName, string skinName)
+		{
+			// 走原加载逻辑
+			if (spineTemplate.TryGetValue(spineName, out int characterTemplateId))
+			{
+				CharacterItem characterItem = Character.Instance[characterTemplateId];
+				// 对于特殊npc，进行特殊处理, 可以用立绘名
+				var curName = characterItem.GivenName;
+				var npcFaceName = characterItem.FixedAvatarName;
+				if (npcRes.ContainsKey(curName))
+					return !resLoad(__instance, null, isTaiwu: false, npcRes[curName]);
+				else if (npcFaceName != null && npcRes.ContainsKey(npcFaceName))
+					return !resLoad(__instance, null, isTaiwu: false, npcRes[npcFaceName]);
+				else
+				{
+					return true;
+				}
+			}
+			return true;
+		}
+
+		[HarmonyReversePatch, HarmonyPatch(typeof(TaiwuAvatar), "RefreshAsSpine")]
+		public static void RefreshAsSpine_Origin(TaiwuAvatar __instance, string spineName, string skinName)
+		{
+			return;
+		}
+
+
 		[HarmonyPrefix, HarmonyPatch(typeof(CharacterAvatar), "FillElement")]
 		public static bool FillElement_Pre(CharacterAvatar __instance)
 		{
+			// MyUtils.MyLog("FillElement_Pre");
 			if (!npcFace) return true;
 			var avatar = Traverse.Create(__instance).Field("_avatar").GetValue<TaiwuAvatar>();
 			QuickCheckNoInit(avatar, out var tobreak);
@@ -1186,6 +1223,23 @@ namespace NpcFace
             }
         }
 
+		// /// <summary>
+		// /// 事件界面商人, 理论上应该处理，但是现在原版都走的动态，就统一在 refreshAsSpine里处理
+		// /// </summary>
+		// [HarmonyPrefix, HarmonyPatch(typeof(EventWindowCharacter), "RefreshAsMerchant")]
+		// public static bool RefreshAsMerchant_Pre(sbyte merchantTemplateId)
+		// {
+		// 	return true;
+		// }
+
+		// /// <summary>
+		// /// 商店界面商人, 理论上应该处理，但是现在原版都走的动态，就统一在 refreshAsSpine里处理
+		// /// </summary>
+		// [HarmonyPrefix, HarmonyPatch(typeof(EventWindowCharacter), "SetTargetCharacterDisplayData")]
+		// public static bool SetTargetCharacterDisplayData_Pre(EventWindowCharacter __instance, CharacterDisplayData displayData, LanguageKey targetTitle)
+		// {
+		// 	return true;
+		// }
 
 
 		#endregion
@@ -1390,7 +1444,7 @@ namespace NpcFace
 			var n = avatarAssetName.Split('$');
 			if(n.Length > 1)
 			{
-				avatar.RefreshAsSpine($"{n[1]}", "");
+				RefreshAsSpine_Origin(avatar, $"{n[1]}", "");
 				return true;
 			}
 			// 走原加载逻辑
@@ -1402,7 +1456,7 @@ namespace NpcFace
 				if (!string.IsNullOrEmpty(spineName))
 				{
 					// MyUtils.MyLog($"TrySpineBuiltIn {spineName}");
-					avatar.RefreshAsSpine(spineName, skinName);
+					RefreshAsSpine_Origin(avatar, spineName, skinName);
 					return true;
 				}
 			}
