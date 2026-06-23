@@ -79,11 +79,13 @@ namespace UabHooker
             }
         }
 
-        // ← 通用文件替换信息
+        // ← 通用文件替换信息（含可选的 w/h 尺寸，0=不指定）
         private class FileReplaceInfo
         {
             public string filePath = "";
             public EnableCondition enableCond = new EnableCondition();
+            public int w = 0; // 0 表示不指定，使用原始尺寸
+            public int h = 0;
         }
 
         // ← 精灵替换信息（含可选的 w/h 尺寸、坐标）
@@ -285,10 +287,16 @@ namespace UabHooker
                         imgInfo.enableCond = ParseEnableCondition(imgEnableRaw, modIdStr);
                         if (imgInfo.enableCond.type == EnableCondition.CondType.Static && !imgInfo.enableCond.staticValue)
                             continue;
+                        int wVal, hVal;
+                        if (img.Attribute("w") != null && int.TryParse((string)img.Attribute("w"), out wVal))
+                            imgInfo.w = wVal;
+                        if (img.Attribute("h") != null && int.TryParse((string)img.Attribute("h"), out hVal))
+                            imgInfo.h = hVal;
                         if (!map.TryGetValue(assetPath, out var innerList))
                             map[assetPath] = innerList = new List<FileReplaceInfo>();
                         innerList.Add(imgInfo);
-                        MyUtils.MyLog($"配置[HookImg] [{bundleName}] {assetPath}[{innerList.Count-1}] -> {imgTo}");
+                        string sizeInfo = imgInfo.w > 0 && imgInfo.h > 0 ? $" w={imgInfo.w} h={imgInfo.h}" : "";
+                        MyUtils.MyLog($"配置[HookImg] [{bundleName}] {assetPath}[{innerList.Count-1}] -> {imgTo}{sizeInfo}");
                     }
                 }
             }
@@ -617,7 +625,7 @@ namespace UabHooker
                     if (bundleKv.Value.TryGetValue(assetPath, out var imgInfo))
                     {
                         if (logEntryImg) MyUtils.MyLog("[HookImg] 匹配到: bundle=" + bundleKv.Key + " filePath=" + imgInfo.filePath + " exists=" + File.Exists(imgInfo.filePath));
-                        var r = LoadRep(imgInfo.filePath, type);
+                        var r = LoadRep(imgInfo.filePath, type, imgInfo.w, imgInfo.h);
                         if (r != null) { if (logReplace) MyUtils.MyLog("[HookImg] 替换: " + assetPath + " -> " + imgInfo.filePath); __result = new ValueTuple<FrameWork.AssetBundlePackage.ResourcePackage, string, UnityEngine.Object>(null, null, r); return false; }
                         else if (logEntryImg) MyUtils.MyLog("[HookImg] LoadRep失败: " + imgInfo.filePath);
                     }
@@ -631,7 +639,7 @@ namespace UabHooker
                         if (bundleKv.Value.TryGetValue(shortName, out var imgInfo))
                         {
                             if (logEntryImg) MyUtils.MyLog("[HookImg] 匹配到短名: bundle=" + bundleKv.Key + " filePath=" + imgInfo.filePath + " exists=" + File.Exists(imgInfo.filePath));
-                            var r = LoadRep(imgInfo.filePath, type);
+                            var r = LoadRep(imgInfo.filePath, type, imgInfo.w, imgInfo.h);
                             if (r != null) { if (logReplace) MyUtils.MyLog("[HookImg] 替换(短名): " + shortName + " -> " + imgInfo.filePath); __result = new ValueTuple<FrameWork.AssetBundlePackage.ResourcePackage, string, UnityEngine.Object>(null, null, r); return false; }
                         }
                     }
@@ -1157,7 +1165,7 @@ namespace UabHooker
             return tex;
         }
 
-        private static UnityEngine.Object LoadRep(string f, Type t)
+        private static UnityEngine.Object LoadRep(string f, Type t, int w = 0, int h = 0)
         {
             if (!File.Exists(f))
             {
@@ -1167,10 +1175,32 @@ namespace UabHooker
                 f = withExt;
             }
             byte[] b; try { b = File.ReadAllBytes(f); } catch { return null; }
-            if (t == typeof(Texture2D) || t == null) { var tx = GetOrLoadTexture(f); return tx; }
-            if (t == typeof(Sprite)) { var tx = GetOrLoadTexture(f); if (tx != null) return Sprite.Create(tx, new Rect(0, 0, tx.width, tx.height), new Vector2(0.5f, 0.5f)); }
+            if (t == typeof(Texture2D) || t == null) { var tx = GetOrLoadTexture(f); if (tx != null && w > 0 && h > 0) tx = ScaleTexture(tx, w, h); return tx; }
+            if (t == typeof(Sprite)) { var tx = GetOrLoadTexture(f); if (tx != null) { if (w > 0 && h > 0) tx = ScaleTexture(tx, w, h); return Sprite.Create(tx, new Rect(0, 0, tx.width, tx.height), new Vector2(0.5f, 0.5f)); } }
             if (t == typeof(TextAsset)) return new TextAsset(System.Text.Encoding.UTF8.GetString(b));
             var fb = GetOrLoadTexture(f); return fb;
+        }
+
+        /// <summary>
+        /// 双线性插值缩放 Texture2D 到指定尺寸
+        /// </summary>
+        private static Texture2D ScaleTexture(Texture2D source, int targetWidth, int targetHeight)
+        {
+            var result = new Texture2D(targetWidth, targetHeight, source.format, false);
+            float incX = 1f / targetWidth;
+            float incY = 1f / targetHeight;
+            var pixels = new Color[targetWidth * targetHeight];
+            for (int py = 0; py < targetHeight; py++)
+            {
+                for (int px = 0; px < targetWidth; px++)
+                {
+                    pixels[py * targetWidth + px] = source.GetPixelBilinear((px + 0.5f) * incX, (py + 0.5f) * incY);
+                }
+            }
+            result.SetPixels(pixels);
+            result.Apply();
+            result.name = source.name;
+            return result;
         }
     }
 }
