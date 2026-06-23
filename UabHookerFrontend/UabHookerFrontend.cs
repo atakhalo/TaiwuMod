@@ -35,7 +35,8 @@ namespace UabHooker
         private static Dictionary<string, Dictionary<string, List<SpriteReplaceInfo>>> _activeAtlas = new Dictionary<string, Dictionary<string, List<SpriteReplaceInfo>>>(); // 运行时有效快照
 
         // ← 源数据：Spine 完整资源替换（hookSpine，atlas + skel，简单 SkeletonGraphic）
-        private static Dictionary<string, SpineReplaceInfo> _replaceSpine = new Dictionary<string, SpineReplaceInfo>();
+        // List 用于支持同一 name 多个条件条目（如不同 dropdown 索引的不同 spine 配置）
+        private static Dictionary<string, List<SpineReplaceInfo>> _replaceSpine = new Dictionary<string, List<SpineReplaceInfo>>();
         // ← 运行时快照（hookSpine）
         private static Dictionary<string, SpineReplaceInfo> _activeSpine = new Dictionary<string, SpineReplaceInfo>();
         // ← 源数据：AvatarSpine 完整资源替换（hookAvatar，含 cover/coverKeep）
@@ -154,7 +155,7 @@ namespace UabHooker
 
             harmony = Harmony.CreateAndPatchAll(typeof(UabHookerFrontendPlugin));
 
-            MyUtils.MyLog($"初始化完成: Uab={_replaceUab.Count}, Img={_replaceImg.Sum(kv=>kv.Value.Count)}, SpineImg={_replaceSpineImg.Sum(kv=>kv.Value.Count)}, Spine={_replaceSpine.Count}, Avatar={_replaceAvatar.Count}, Atlas={_sourceAtlas.Count}");
+            MyUtils.MyLog($"初始化完成: Uab={_replaceUab.Count}, Img={_replaceImg.Sum(kv=>kv.Value.Count)}, SpineImg={_replaceSpineImg.Sum(kv=>kv.Value.Count)}, Spine={_replaceSpine.Sum(kv=>kv.Value.Count)}, Avatar={_replaceAvatar.Count}, Atlas={_sourceAtlas.Count}");
 
             // 延迟一帧刷新有效条目，等所有 mod 设置还原完成
             GameApp.Instance.StartCoroutine(DelayedRebuild());
@@ -386,8 +387,10 @@ namespace UabHooker
                     if (info.enableCond.type == EnableCondition.CondType.Static && !info.enableCond.staticValue)
                         continue;
 
-                    _replaceSpine[spineName] = info;
-                    MyUtils.MyLog($"配置[HookSpine] {spineName} -> atlas={atlasTo}, skel={skelTo}");
+                    if (!_replaceSpine.TryGetValue(spineName, out var list))
+                        _replaceSpine[spineName] = list = new List<SpineReplaceInfo>();
+                    list.Add(info);
+                    MyUtils.MyLog($"配置[HookSpine] {spineName}[{list.Count-1}] -> atlas={atlasTo}, skel={skelTo}");
                 }
             }
 
@@ -503,11 +506,15 @@ namespace UabHooker
                     _activeSpineImg[skelKv.Key] = inner;
             }
 
-            // _replaceSpine
+            // _replaceSpine（list 结构，同 name 多条，取第一个 enable 的）
             _activeSpine.Clear();
             foreach (var kv in _replaceSpine)
-                if (kv.Value.enableCond.IsEnabled())
-                    _activeSpine[kv.Key] = kv.Value;
+                foreach (var info in kv.Value)
+                    if (info.enableCond.IsEnabled())
+                    {
+                        _activeSpine[kv.Key] = info;
+                        break;
+                    }
 
             // _replaceAvatar
             _activeAvatar.Clear();
@@ -610,21 +617,37 @@ namespace UabHooker
 		[HarmonyPatch(typeof(SkeletonGraphic), "Initialize", new Type[] { typeof(bool) })]
 		public static void SkeletonGraphic_Pre_Spine(SkeletonGraphic __instance, ref bool overwrite)
         {
-            if (_activeSpine.Count == 0 || __instance == null) return;
+            if (__instance == null) return;
+
+            // 如果 _activeSpine 还未填充（DelayedRebuild 延迟一帧），立即构建
+            if (_activeSpine.Count == 0 && _replaceSpine.Count > 0)
+                RebuildActiveEntries();
+
+            if (logEntrySpine)
+                MyUtils.MyLog($"[HookSpine] 入口: _activeSpine={_activeSpine.Count} _replaceSpine={_replaceSpine.Sum(kv=>kv.Value.Count)} instance={__instance.name}");
+            if (_activeSpine.Count == 0) return;
 
             var sda = __instance.SkeletonDataAsset;
-            if (sda == null) return;
-
+            if (sda == null)
+            {
+                if (logEntrySpine) MyUtils.MyLog("[HookSpine] sda=null, 跳过");
+                return;
+            }
             string sdaName = sda.name;
-            if (string.IsNullOrEmpty(sdaName)) return;
+            if (string.IsNullOrEmpty(sdaName))
+            {
+                if (logEntrySpine) MyUtils.MyLog("[HookSpine] sda.name 为空, 跳过");
+                return;
+            }
             if (logEntrySpine) MyUtils.MyLog("[HookSpine] 入口: sda=" + sdaName);
 
             foreach (var kv in _activeSpine)
             {
                 if (sdaName.IndexOf(kv.Key, StringComparison.OrdinalIgnoreCase) < 0) continue;
 
-                string cacheKey = kv.Key;
                 var info = kv.Value;
+                // cacheKey 包含文件路径，保证不同配置（同 name 不同文件）不命中旧缓存
+                string cacheKey = kv.Key + "|" + info.atlasPath + "|" + info.skelPath;
 
                 if (!_spineCache.TryGetValue(cacheKey, out var cached) || cached == null || cached.SkeletonAsset == null)
                 {
@@ -663,7 +686,8 @@ namespace UabHooker
                 if (sdaName.IndexOf(kv.Key, StringComparison.OrdinalIgnoreCase) < 0) continue;
 
                 var info = kv.Value;
-                string cacheKey = kv.Key;
+                // cacheKey 包含文件路径，保证不同配置不命中旧缓存
+                string cacheKey = kv.Key + "|" + info.atlasPath + "|" + info.skelPath;
 
                 if (!_spineCache.TryGetValue(cacheKey, out var cached) || cached == null || cached.SkeletonAsset == null)
                 {
