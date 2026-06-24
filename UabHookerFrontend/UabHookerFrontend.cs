@@ -642,9 +642,9 @@ namespace UabHooker
         [HarmonyPatch(typeof(AssetBundle), "LoadFromFile", new Type[] { typeof(string) })]
         public static void Prefix_LoadFromFile(ref string path)
         {
-            if (string.IsNullOrEmpty(path) || _activeUab.Count == 0)
-            { if (logEntryUab && !string.IsNullOrEmpty(path)) MyUtils.MyLog("[HookUab] 入口: path=" + path); return; }
-            if (logEntryUab) MyUtils.MyLog("[HookUab] 入口: path=" + path);
+            if (logEntryUab) MyUtils.MyLog("[HookUab] 入口: path=" + (path ?? "null"));
+
+            if (string.IsNullOrEmpty(path) || _activeUab.Count == 0) return;
 
             if (_activeUab.TryGetValue(path, out var info))
             { if (logReplace) MyUtils.MyLog("[HookUab] 替换: " + path + " -> " + info.filePath); path = info.filePath; return; }
@@ -668,8 +668,9 @@ namespace UabHooker
             if (_activeImg.Count == 0 && _replaceImg.Count > 0)
                 RebuildActiveEntries();
 
-            if (_activeImg.Count == 0) { if (logEntryImg && !string.IsNullOrEmpty(assetPath)) MyUtils.MyLog("[HookImg] 入口: assetPath=" + assetPath + " type=" + type?.Name + " (activeImg为空)"); return true; }
-            if (logEntryImg) MyUtils.MyLog("[HookImg] 入口: assetPath=" + (assetPath ?? assetName) + " type=" + type?.Name + " activeImgKeys=" + string.Join(",", _activeImg.Keys));
+            if (logEntryImg) MyUtils.MyLog("[HookImg] 入口: assetPath=" + (assetPath ?? "null") + " type=" + type?.Name + " activeKeys=" + string.Join(",", _activeImg.Keys));
+
+            if (_activeImg.Count == 0) return true;
 
             // 只替换我们支持的资源类型，其他类型放行
             if (type != typeof(Texture2D) && type != typeof(Sprite) && type != typeof(TextAsset) && type != null)
@@ -814,11 +815,11 @@ namespace UabHooker
 		[HarmonyPatch(typeof(AvatarSkeleton), "SetupSkeletonGraphic")]
 		public static void SetupSkeletonGraphic_Pre(SkeletonGraphic target, ref SkeletonDataAsset skeletonDataAsset)
         {
-            if (_activeAvatar.Count == 0 || skeletonDataAsset == null) return;
+            string sdaName = skeletonDataAsset?.name;
+            if (logEntryAvatar) MyUtils.MyLog("[HookAvatar] SetupSkeletonGraphic 入口: sda=" + (sdaName ?? "null"));
 
-            string sdaName = skeletonDataAsset.name;
+            if (_activeAvatar.Count == 0 || skeletonDataAsset == null) return;
             if (string.IsNullOrEmpty(sdaName)) return;
-            if (logEntryAvatar) MyUtils.MyLog("[HookAvatar] SetupSkeletonGraphic 入口: sda=" + sdaName);
 
             foreach (var kv in _activeAvatar)
             {
@@ -1005,15 +1006,17 @@ namespace UabHooker
 		[HarmonyPatch(typeof(SkeletonGraphic), "Initialize", new Type[] { typeof(bool) })]
 		public static void SkeletonGraphic_Pre(SkeletonGraphic __instance)
         {
-            if (_activeSpineImg.Count == 0 || __instance == null) { if (logEntrySpineImg) MyUtils.MyLog("[HookSpineImg] 入口: cnt=0/null"); return; }
+            if (logEntrySpineImg) MyUtils.MyLog("[HookSpineImg] 入口: instance=" + (__instance?.name ?? "null"));
+
+            if (_activeSpineImg.Count == 0 || __instance == null) return;
 
             var tra = Traverse.Create(__instance);
             var sda = tra.Property("SkeletonDataAsset").GetValue<SkeletonDataAsset>();
-            if (sda == null) { if (logEntrySpineImg) MyUtils.MyLog("[HookSpineImg] 入口: sda=null"); return; }
+            if (sda == null) { if (logEntrySpineImg) MyUtils.MyLog("[HookSpineImg] sda=null, 跳过"); return; }
 
             string sdaName = sda.name;
 			var mainTexture = tra.Property("mainTexture").GetValue<Texture2D>();
-			if (logEntrySpineImg) MyUtils.MyLog("[HookSpineImg] 入口: sda=" + (sdaName ?? "null") + " tex=" + (mainTexture?.name ?? "null"));
+			if (logEntrySpineImg) MyUtils.MyLog("[HookSpineImg] sda=" + (sdaName ?? "null") + " tex=" + (mainTexture?.name ?? "null"));
             if (string.IsNullOrEmpty(sdaName)) return;
 			if (mainTexture == null) return;
 
@@ -1070,9 +1073,10 @@ namespace UabHooker
         [HarmonyPatch(typeof(SpriteAtlas), "GetSprite", new Type[] { typeof(string) })]
         public static bool SpriteAtlas_GetSprite_Pre(SpriteAtlas __instance, string name, ref Sprite __result)
         {
-            if (_activeAtlas.Count == 0) return true;
-            string atlasName = __instance.name;
+            string atlasName = __instance?.name ?? "null";
             if (logEntryAtlas) MyUtils.MyLog("[HookAtlas] 入口: atlas=" + atlasName + " sprite=" + name);
+
+            if (_activeAtlas.Count == 0) return true;
 
             if (_activeAtlas.TryGetValue(atlasName, out var sprites) && sprites.TryGetValue(name, out var list))
             {
@@ -1099,9 +1103,10 @@ namespace UabHooker
         [HarmonyPatch(typeof(AtlasInfo), "SetImageSpriteOnly", new Type[] { typeof(CImage), typeof(string) })]
         public static bool AtlasInfo_SetImageSpriteOnly_Pre(CImage image, string spriteName, ref bool __result)
         {
+            if (logEntryAtlas) MyUtils.MyLog("[HookAtlas] SetImageSpriteOnly 入口: sprite=" + (spriteName ?? "null"));
+
             if (_activeAtlas.Count == 0) return true;
             if (image == null || string.IsNullOrEmpty(spriteName)) return true;
-            if (logEntryAtlas) MyUtils.MyLog("[HookAtlas] SetImageSpriteOnly 入口: sprite=" + spriteName);
 
             foreach (var atlasKv in _activeAtlas)
             {
