@@ -106,6 +106,7 @@ namespace UabHooker
             public bool coverKeep = false; // true=保留原始 cover，false=隐藏（默认）
             public string coverAtlasPath = ""; // cover .atlas 文件路径（不为空时替换 cover）
             public string coverSkelPath = "";  // cover .skel / .json 文件路径
+            public string objDir = ""; // 可选：匹配 GameObject 名称或路径后缀（如 "NpcSpine" 或 "Body/NpcSpine"），用于区分重名 spine
         }
 
         // ← Spine 运行时资源缓存
@@ -403,11 +404,13 @@ namespace UabHooker
                     info.enableCond = ParseEnableCondition(enableRaw, modIdStr);
                     if (info.enableCond.type == EnableCondition.CondType.Static && !info.enableCond.staticValue)
                         continue;
+                    info.objDir = (string)spine.Attribute("objDir") ?? "";
 
                     if (!_replaceSpine.TryGetValue(spineName, out var list))
                         _replaceSpine[spineName] = list = new List<SpineReplaceInfo>();
                     list.Add(info);
-                    MyUtils.MyLog($"配置[HookSpine] {spineName}[{list.Count-1}] -> atlas={atlasTo}, skel={skelTo}");
+                    string objDirLog = string.IsNullOrEmpty(info.objDir) ? "" : $" objDir={info.objDir}";
+                    MyUtils.MyLog($"配置[HookSpine] {spineName}[{list.Count-1}] -> atlas={atlasTo}, skel={skelTo}{objDirLog}");
                 }
             }
 
@@ -427,6 +430,7 @@ namespace UabHooker
                     info.enableCond = ParseEnableCondition(enableRaw, modIdStr);
                     if (info.enableCond.type == EnableCondition.CondType.Static && !info.enableCond.staticValue)
                         continue;
+                    info.objDir = (string)spine.Attribute("objDir") ?? "";
 
                     // coverkeep: true=保留原始 cover，不填或 false=隐藏 cover（默认）
                     string coverKeepRaw = (string)spine.Attribute("coverkeep") ?? "false";
@@ -444,7 +448,8 @@ namespace UabHooker
                         logExtra += " coverAtlas=" + info.coverAtlasPath;
                     if (!string.IsNullOrEmpty(info.coverSkelPath))
                         logExtra += " coverSkel=" + info.coverSkelPath;
-                    MyUtils.MyLog($"配置[HookAvatar] {spineName}[{list.Count-1}] -> atlas={atlasTo}, skel={skelTo}" + logExtra);
+                    string objDirLog = string.IsNullOrEmpty(info.objDir) ? "" : $" objDir={info.objDir}";
+                    MyUtils.MyLog($"配置[HookAvatar] {spineName}[{list.Count-1}] -> atlas={atlasTo}, skel={skelTo}" + logExtra + objDirLog);
                 }
             }
         }
@@ -574,6 +579,59 @@ namespace UabHooker
                 if (inner.Count > 0)
                     _activeAtlas[atlasKv.Key] = inner;
             }
+
+            // 重建后启动协程延迟一帧刷新场景中的 SkeletonGraphic，使新配置立即生效
+            if (GameApp.Instance != null)
+                GameApp.Instance.StartCoroutine(DelayedRefresh());
+        }
+
+        private static IEnumerator DelayedRefresh()
+        {
+            yield return null;
+            RefreshMatchingSkeletonGraphics();
+        }
+
+        /// <summary>
+        /// 遍历场景中所有已激活的 SkeletonGraphic/Avatar，对匹配当前 _activeSpine / _activeAvatar 的
+        /// 触发重新 Initialize/Refresh，使切换设置后立即生效（而不是等下次打开界面）。
+        /// </summary>
+        private static void RefreshMatchingSkeletonGraphics()
+        {
+            // HookSpine
+            if (_activeSpine.Count > 0)
+            {
+                var sgs = UnityEngine.Object.FindObjectsOfType<SkeletonGraphic>();
+                foreach (var sg in sgs)
+                {
+                    if (sg == null || sg.skeletonDataAsset == null) continue;
+                    string sdaName = sg.skeletonDataAsset.name;
+                    if (string.IsNullOrEmpty(sdaName)) continue;
+
+                    foreach (var kv in _activeSpine)
+                    {
+                        if (sdaName.IndexOf(kv.Key, StringComparison.OrdinalIgnoreCase) < 0) continue;
+                        if (!MatchesObjDir(sg, kv.Value.objDir)) continue;
+
+                        if (logReplace)
+                            MyUtils.MyLog($"[HookSpine] 设置变更后重新初始化: [{kv.Key}] sg={sg.name} sda={sdaName}");
+                        sg.Initialize(true);
+                        break;
+                    }
+                }
+            }
+
+            // HookAvatar: 找到场景中所有 Avatar 组件触发 Refresh
+            if (_activeAvatar.Count > 0)
+            {
+                var avatars = UnityEngine.Object.FindObjectsOfType<Game.Components.Avatar.Avatar>();
+                foreach (var av in avatars)
+                {
+                    if (av == null || !av.isActiveAndEnabled || av.Data == null) continue;
+                    if (logReplace)
+                        MyUtils.MyLog($"[HookAvatar] 设置变更后触发刷新: avatarId={av.Data.AvatarId}");
+                    av.Refresh();
+                }
+            }
         }
 
         // ═══════════════════════════════════════════════════════════════
@@ -651,6 +709,33 @@ namespace UabHooker
             return true;
         }
 
+		/// <summary>
+		/// 检查 SkeletonGraphic 的 GameObject 名称或完整路径后缀是否匹配 objDir。
+		/// 支持：
+		///   - "NpcSpine" → 匹配任何名为 NpcSpine 的对象（包括自身）
+		///   - "Body/NpcSpine" → 匹配路径以 Body/NpcSpine 结尾
+		///   - "AvatarContainer/Body/NpcSpine" → 完整路径匹配
+		/// </summary>
+		private static bool MatchesObjDir(SkeletonGraphic sg, string objDir)
+		{
+			if (sg == null || string.IsNullOrEmpty(objDir)) return true; // 无限制
+			// 1. 直接匹配当前对象名称
+			if (sg.gameObject.name == objDir) return true;
+			// 2. 构建从自身到根的完整路径（用 / 分隔），检查是否以 objDir 结尾
+			var parts = new List<string>();
+			var t = sg.transform;
+			while (t != null)
+			{
+				parts.Add(t.name);
+				t = t.parent;
+			}
+			parts.Reverse(); // 现在 parts = [root, ..., parent, self]
+			string fullPath = string.Join("/", parts);
+			if (fullPath.EndsWith(objDir, StringComparison.OrdinalIgnoreCase))
+				return true;
+			return false;
+		}
+
 		// ═══════════════════════════════════════════════════════════════
 		//  Hook 3a: SkeletonGraphic.Initialize — Spine 完整资源替换（简单 SkeletonGraphic）
 		//  替换 atlas + skel，强制 overwrite=true 确保 Skeleton + AnimationState 完整重建
@@ -687,9 +772,19 @@ namespace UabHooker
 
             foreach (var kv in _activeSpine)
             {
-                if (sdaName.IndexOf(kv.Key, StringComparison.OrdinalIgnoreCase) < 0) continue;
-
                 var info = kv.Value;
+
+                // objDir 过滤：检查对象名/路径后缀（支持 "NpcSpine" 或 "Body/NpcSpine" 等）
+                if (!MatchesObjDir(__instance, info.objDir))
+                {
+                    if (logEntrySpine) MyUtils.MyLog($"[HookSpine] objDir不匹配: need={info.objDir} 跳过 [{kv.Key}]");
+                    continue;
+                }
+
+                // 用 sda.name 匹配
+                if (sdaName.IndexOf(kv.Key, StringComparison.OrdinalIgnoreCase) < 0)
+                    continue;
+
                 // cacheKey 包含文件路径，保证不同配置（同 name 不同文件）不命中旧缓存
                 string cacheKey = kv.Key + "|" + info.atlasPath + "|" + info.skelPath;
 
@@ -717,7 +812,7 @@ namespace UabHooker
 
 		[HarmonyPrefix]
 		[HarmonyPatch(typeof(AvatarSkeleton), "SetupSkeletonGraphic")]
-		public static void SetupSkeletonGraphic_Pre(ref SkeletonDataAsset skeletonDataAsset)
+		public static void SetupSkeletonGraphic_Pre(SkeletonGraphic target, ref SkeletonDataAsset skeletonDataAsset)
         {
             if (_activeAvatar.Count == 0 || skeletonDataAsset == null) return;
 
@@ -727,9 +822,19 @@ namespace UabHooker
 
             foreach (var kv in _activeAvatar)
             {
-                if (sdaName.IndexOf(kv.Key, StringComparison.OrdinalIgnoreCase) < 0) continue;
-
                 var info = kv.Value;
+
+                // objDir 过滤：检查对象名/路径后缀
+                if (!MatchesObjDir(target, info.objDir))
+                {
+                    if (logEntryAvatar) MyUtils.MyLog($"[HookAvatar] objDir不匹配: need={info.objDir} 跳过 [{kv.Key}]");
+                    continue;
+                }
+
+                // 用 sda.name 匹配
+                if (sdaName.IndexOf(kv.Key, StringComparison.OrdinalIgnoreCase) < 0)
+                    continue;
+
                 // cacheKey 包含文件路径，保证不同配置不命中旧缓存
                 string cacheKey = kv.Key + "|" + info.atlasPath + "|" + info.skelPath;
 
