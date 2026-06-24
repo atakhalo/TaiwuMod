@@ -39,6 +39,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "UabHookerFrontend", "UabHoo
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LoadBgFrontend", "LoadBgFrontend\LoadBgFrontend.csproj", "{ADB5B7EC-F4A2-4142-ADA2-EBE884D18F6D}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DepPopupFrontend", "DepPopupFrontend\DepPopupFrontend.csproj", "{0678850C-2704-4BE8-8914-86CA1E1B6CD9}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -265,6 +267,18 @@ Global
 		{ADB5B7EC-F4A2-4142-ADA2-EBE884D18F6D}.Release|x64.Build.0 = Release|Any CPU
 		{ADB5B7EC-F4A2-4142-ADA2-EBE884D18F6D}.Release|x86.ActiveCfg = Release|Any CPU
 		{ADB5B7EC-F4A2-4142-ADA2-EBE884D18F6D}.Release|x86.Build.0 = Release|Any CPU
+		{0678850C-2704-4BE8-8914-86CA1E1B6CD9}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{0678850C-2704-4BE8-8914-86CA1E1B6CD9}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{0678850C-2704-4BE8-8914-86CA1E1B6CD9}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{0678850C-2704-4BE8-8914-86CA1E1B6CD9}.Debug|x64.Build.0 = Debug|Any CPU
+		{0678850C-2704-4BE8-8914-86CA1E1B6CD9}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{0678850C-2704-4BE8-8914-86CA1E1B6CD9}.Debug|x86.Build.0 = Debug|Any CPU
+		{0678850C-2704-4BE8-8914-86CA1E1B6CD9}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{0678850C-2704-4BE8-8914-86CA1E1B6CD9}.Release|Any CPU.Build.0 = Release|Any CPU
+		{0678850C-2704-4BE8-8914-86CA1E1B6CD9}.Release|x64.ActiveCfg = Release|Any CPU
+		{0678850C-2704-4BE8-8914-86CA1E1B6CD9}.Release|x64.Build.0 = Release|Any CPU
+		{0678850C-2704-4BE8-8914-86CA1E1B6CD9}.Release|x86.ActiveCfg = Release|Any CPU
+		{0678850C-2704-4BE8-8914-86CA1E1B6CD9}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
