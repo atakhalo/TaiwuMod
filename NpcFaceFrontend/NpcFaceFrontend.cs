@@ -43,6 +43,8 @@ using TaiwuAvatar = Game.Components.Avatar.Avatar;
 using TaiwuAvatarSize = Game.Components.Avatar.AvatarSize;
 using System.Xml.Linq;
 using GameData.Domains.Character.Creation;
+using Game.Views.EventWindow;
+using System.Diagnostics;
 
 namespace NpcFace
 {
@@ -50,7 +52,7 @@ namespace NpcFace
 	{
 		public static void MyLog(string log)
 		{
-			Debug.Log($"[{nameof(NpcFace)}] {log}");
+			UnityEngine.Debug.Log($"[{nameof(NpcFace)}] {log}");
 		}
 
 		public static void DelayCall(Action action, float delay, bool real)
@@ -189,6 +191,8 @@ namespace NpcFace
     public class NpcFaceFrontendPlugin : TaiwuRemakePlugin
     {
         private Harmony harmony;
+
+		private static bool showEntryLog = false;
 
 
         public static bool npcFace; // 开关 是否开启
@@ -709,7 +713,7 @@ namespace NpcFace
             string curName = NameCenter.GetMonasticTitleOrDisplayName(displayData, isTaiwu: false);
             if (curName != "")
             {
-				// MyUtils.MyLog($"TrySetNpcFaceByName 找到名字 {curName}");
+				MyUtils.MyLog($"TrySetNpcFaceByName 找到名字 {curName}");
                 if (npcRes.ContainsKey(curName))
                     return resLoad(avatar, instance, isTaiwu: false, npcRes[curName]);
             }
@@ -1035,18 +1039,22 @@ namespace NpcFace
 		public static bool OnRefreshChar_Dis_Pre(TaiwuAvatar __instance, CharacterDisplayData displayData, bool isShowGrave)
 		{
 			if (!npcFace) return true;
-			// MyUtils.MyLog($"OnRefreshChar_Dis_Pre");
+            string curName = NameCenter.GetMonasticTitleOrDisplayName(displayData, isTaiwu: false);
+			if (showEntryLog) MyUtils.MyLog($"OnRefreshChar_Dis_Pre, id = {displayData.CharacterId}, name = {curName}");
+
 			QuickCheckNoInit(__instance, out var tobreak);
 			if(tobreak) return false;
-			GameApp.Instance.StartCoroutine(DelayCoroutine_OnRefreshChar_Dis(OnRefreshChar_Dis_Wrapper, 0, __instance, displayData, isShowGrave));
+			OnRefreshChar_Dis_Wrapper(__instance, displayData, isShowGrave);
+			// GameApp.Instance.StartCoroutine(DelayCoroutine_OnRefreshChar_Dis(OnRefreshChar_Dis_Wrapper, 0, __instance, displayData, isShowGrave));
 			return false;
 		}
 
 		private static IEnumerator DelayCoroutine_OnRefreshChar_Dis(Func<TaiwuAvatar, CharacterDisplayData, bool, bool> action, float delay, TaiwuAvatar avatar, CharacterDisplayData displayData, bool isShowGrave)
 		{
 			yield return null;
-			//yield return new WaitForSeconds(delay);
+			// if(delay > 0f) yield return new WaitForSeconds(delay);
 			action?.Invoke(avatar, displayData, isShowGrave);
+			yield break;
 		}
 
 		public static bool OnRefreshChar_Dis_Wrapper(TaiwuAvatar __instance, CharacterDisplayData displayData, bool isShowGrave)
@@ -1080,7 +1088,7 @@ namespace NpcFace
 		public static bool OnRefreshChar_Related_Pre(TaiwuAvatar __instance, AvatarRelatedData relatedData)
 		{
 			if (!npcFace) return true;
-			// MyUtils.MyLog("OnRefreshChar_Related_Pre");
+			if(showEntryLog) MyUtils.MyLog("OnRefreshChar_Related_Pre");
 			QuickCheckNoInit(__instance, out var tobreak);
 			if (tobreak) return false;
 			GameApp.Instance.StartCoroutine(DelayCoroutine_OnRefreshChar_Related(OnRefreshChar_Related_Wrapper, 0, __instance, relatedData));
@@ -1091,8 +1099,9 @@ namespace NpcFace
 			Func<TaiwuAvatar, AvatarRelatedData, bool> action, float delay, TaiwuAvatar avatar, AvatarRelatedData relatedData)
 		{
 			yield return null;
-			//yield return new WaitForSeconds(delay);
+			if (delay > 0f) yield return new WaitForSeconds(delay);
 			action?.Invoke(avatar, relatedData);
+			yield break;
 		}
 
 		public static bool OnRefreshChar_Related_Wrapper(TaiwuAvatar __instance, AvatarRelatedData relatedData)
@@ -1121,6 +1130,8 @@ namespace NpcFace
 		public static bool OnRefreshChar_Related_Pre(TaiwuAvatar __instance, AvatarRelatedData relatedData, short characterTemplateId)
 		{
 			if (!npcFace) return true;
+			if (showEntryLog) MyUtils.MyLog("OnRefreshChar_Related_Pre Template");
+
 			CharacterItem characterItem = Config.Character.Instance[characterTemplateId];
 			// MyUtils.MyLog($"OnRefreshChar_Related_Pre  tem {characterItem.GivenName} {characterItem.FixedAvatarName}, {CreatingType.IsFixedPresetType(characterItem.CreatingType)}");
 			if (!CreatingType.IsFixedPresetType(characterItem.CreatingType)) // 放行到普通refresh
@@ -1146,6 +1157,9 @@ namespace NpcFace
 		[HarmonyPrefix, HarmonyPatch(typeof(TaiwuAvatar), "RefreshAsSpine")]
 		public static bool RefreshAsSpine_Pre(TaiwuAvatar __instance, string spineName, string skinName)
 		{
+			if (!npcFace) return true;
+			if (showEntryLog) MyUtils.MyLog("RefreshAsSpine_Pre");
+
 			// 走原加载逻辑
 			if (spineTemplate.TryGetValue(spineName, out int characterTemplateId))
 			{
@@ -1175,8 +1189,8 @@ namespace NpcFace
 		[HarmonyPrefix, HarmonyPatch(typeof(CharacterAvatar), "FillElement")]
 		public static bool FillElement_Pre(CharacterAvatar __instance)
 		{
-			// MyUtils.MyLog("FillElement_Pre");
 			if (!npcFace) return true;
+			if (showEntryLog) MyUtils.MyLog("FillElement_Pre");
 			var avatar = Traverse.Create(__instance).Field("_avatar").GetValue<TaiwuAvatar>();
 			QuickCheckNoInit(avatar, out var tobreak);
 			if (tobreak) return false;
