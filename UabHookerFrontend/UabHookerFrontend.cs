@@ -936,40 +936,10 @@ namespace UabHooker
                 }
             }
             if (bfCount > 0)
-                MyUtils.MyLog("[HookAvatar] 刷新后重绑 " + bfCount + " 个 BoneFollowerGraphic");
-
-            // 3. 记录所有 SkeletonGraphic 的位置，供调试
-            var sgs = __instance.GetComponentsInChildren<SkeletonGraphic>(true);
-            foreach (var sg in sgs)
-            {
-                if (sg == null || sg.skeletonDataAsset == null) continue;
-                var sgName = sg.skeletonDataAsset.name ?? "?";
-                var ap = sg.rectTransform.anchoredPosition;
-                if (sgName.Contains("menpai") || sgName.Contains("hair") || sgName.Contains("eye"))
-                {
-                    MyUtils.MyLog($"[HookAvatar] 位置: [{sgName}] anchoredPos=({ap.x:F1},{ap.y:F1}) localScale=({sg.transform.localScale.x:F3})");
-                }
-            }
-
-            // 4. 检查 partGroupConfigurations 中的 hair 相关 RectTransform
-            try
-            {
-                var tra = Traverse.Create(__instance);
-                var backHairRT = tra.Field("backHairPosition").GetValue<RectTransform>();
-                var frontHairRT = tra.Field("frontHairPosition").GetValue<RectTransform>();
-                if (backHairRT != null)
-                    MyUtils.MyLog($"[HookAvatar] backHairPosition: anchoredPos=({backHairRT.anchoredPosition.x:F1},{backHairRT.anchoredPosition.y:F1})");
-                if (frontHairRT != null)
-                    MyUtils.MyLog($"[HookAvatar] frontHairPosition: anchoredPos=({frontHairRT.anchoredPosition.x:F1},{frontHairRT.anchoredPosition.y:F1})");
-
-                var headInner = tra.Field("skeletonHeadInnerPosition").GetValue<RectTransform>();
-                var headOuter = tra.Field("skeletonHeadOuterPosition").GetValue<RectTransform>();
-                if (headInner != null)
-                    MyUtils.MyLog($"[HookAvatar] headInner: anchoredPos=({headInner.anchoredPosition.x:F1},{headInner.anchoredPosition.y:F1})");
-                if (headOuter != null)
-                    MyUtils.MyLog($"[HookAvatar] headOuter: anchoredPos=({headOuter.anchoredPosition.x:F1},{headOuter.anchoredPosition.y:F1})");
-            }
-            catch { }
+			{
+				if (logReplace)
+					MyUtils.MyLog("[HookAvatar] 刷新后重绑 " + bfCount + " 个 BoneFollowerGraphic");
+			}
         }
 
         /// <summary>
