@@ -297,6 +297,7 @@ namespace NpcFace
 			public float smallOffsetX = 0f;
 			public float smallOffsetY = 0f;
 
+			public float markPadY = 0f; // 用来防止被裁剪
 
 		}
 		// spine 配置缓存； 设置变化的是否清零；
@@ -1408,6 +1409,7 @@ namespace NpcFace
 			sc.noramlOffsetY = float.Parse(doc.Descendants("noramlOffsetY").FirstOrDefault()?.Value ?? "0");
 			sc.smallOffsetX = float.Parse(doc.Descendants("smallOffsetX").FirstOrDefault()?.Value ?? "0");
 			sc.smallOffsetY = float.Parse(doc.Descendants("smallOffsetY").FirstOrDefault()?.Value ?? "0");
+			sc.markPadY = float.Parse(doc.Descendants("markPadY").FirstOrDefault()?.Value ?? "0");
 
 			sc.attachments = doc.Descendants("attachments")
 				.Elements("item")
@@ -1795,9 +1797,6 @@ namespace NpcFace
 
 				// 应用附件
 				// ApplySpineAttachments(npcSkeleton, spineConfig);
-				// 应用偏移（使用 Traverse 调用私有方法）
-				var o = GetSpineOffset(spineConfig, avatar.Size);
-				Traverse.Create(avatar).Method("ApplyAvatarOffset", o).GetValue();
 			}
 			else
 			{
@@ -1835,10 +1834,30 @@ namespace NpcFace
 
 				Traverse.Create(avatar).Field("_currentSpineName").SetValue(spineName);
 				Traverse.Create(avatar).Field("_currentSpineSkin").SetValue(skinName);
-				// 应用偏移
-				var o = GetSpineOffset(spineConfig, avatar.Size);
-				Traverse.Create(avatar).Method("ApplyAvatarOffset", o).GetValue();
 			}
+			// 应用偏移
+			var o = GetSpineOffset(spineConfig, avatar.Size);
+			Traverse.Create(avatar).Method("ApplyAvatarOffset", o).GetValue();
+
+			// MyUtils.MyLog("尝试应用 mask");
+			// 应用裁剪偏移
+			var m = avatar.transform.parent.GetComponent<RectMask2D>();
+			if (m == null)
+			{
+				m = avatar.transform.parent.parent.GetComponent<RectMask2D>();
+			}
+			if (m != null)
+			{
+				var p = m.padding;
+				p.y = spineConfig.markPadY;
+				m.padding = p;
+				// MyUtils.MyLog($"应用 mask {m.padding}");
+			}
+			// var r = avatar.GetComponentInParent<RectMask2D>();
+			// if(r)
+			// {
+			// 	MyUtils.MyLog($"parent r :  {r.name} {r.padding}");
+			// }
 
 			// 触发 CharacterAvatar 回调
 			if (instance != null)
