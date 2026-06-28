@@ -19,6 +19,7 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Scripting;
 using Microsoft.CodeAnalysis.Scripting;
+using System.Threading.Tasks;
 
 namespace InGameHelper
 {
@@ -554,8 +555,18 @@ namespace InGameHelper
 				yield break;
 			}
 
-			// 异步执行（不能放 try-catch 里）
-			var task = script.RunAsync(globalsInstance);
+			// 异步执行（Task 异常通过 task.IsFaulted 处理，不依赖 try-catch）
+			Task<ScriptState<object>> task = null;
+			try
+			{
+				task = script.RunAsync(globalsInstance);
+			}
+			catch (Exception ex)
+			{
+				MyUtils.MyLog($"[ProcessFrontCsCoroutine] RunAsync 同步异常: {ex.Message}");
+				WriteResponse(new GameResponse { RequestId = request.RequestId, Success = false, Error = $"脚本启动失败: {ex.Message}" });
+				yield break;
+			}
 			while (!task.IsCompleted) yield return null;
 
 			// 处理结果
