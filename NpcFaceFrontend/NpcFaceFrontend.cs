@@ -532,8 +532,13 @@ namespace NpcFace
         {
             if (toReadFile)
             {
-				ModInfo modInfo = ModManager.LocalMods[ModIdStr];
-				var filePath = Path.Combine(modInfo.DirectoryName, "npcFace.txt");
+				DirectoryInfo parent = new DirectoryInfo(Application.dataPath).Parent;
+				var filePath = Path.Combine(parent.FullName, "ModSettingSave", "太吾迎娇(npc立绘)", "npcFace.txt");
+				if (!File.Exists(filePath))
+				{
+					ModInfo modInfo = ModManager.LocalMods[ModIdStr];
+					filePath = Path.Combine(modInfo.DirectoryName, "npcFace.txt");		
+				}
 				if (File.Exists(filePath))
                 {
 					MyUtils.MyLog($"尝试读取 npcFace.txt {filePath}");
