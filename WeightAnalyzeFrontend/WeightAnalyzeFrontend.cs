@@ -213,54 +213,87 @@ namespace WeightAnalyze
         }
 #endif
 
+        /*
+         * LanguageKey -> 中文映射（保留备查，如需恢复本地化调用可用 ToLoc(LanguageKey.XXX) 替换）
+         * LK_Equip_Slot_Name_Short_Weapon   => "兵"
+         * LK_Equip_Slot_Name_Short_Torso    => "甲"
+         * LK_Item_Filter_SubType_Material_Food     => "食"
+         * LK_Item_Filter_SubType_Material_Wood     => "木"
+         * LK_Item_Filter_SubType_Material_Metal    => "铁"
+         * LK_Item_Filter_SubType_Material_Jade     => "玉"
+         * LK_Item_Filter_SubType_Material_Fabric   => "织"
+         * LK_Item_Filter_SubType_Material_Medicine => "药"
+         * LK_Item_Filter_SubType_Food_Vegetarian   => "素"
+         * LK_Item_Filter_SubType_Food_Meat  => "荤"
+         * LK_Item_Filter_SubType_Food_Tea   => "茶"
+         * LK_Item_Filter_SubType_Food_Wine  => "酒"
+         * LK_Item_Filter_SubType_Book_LifeSkill    => "技"
+         * LK_Item_Filter_SubType_Book_CombatSkill  => "武"
+         * LK_ItemSubType_1100 => "促织"
+         * LK_ItemSubType_1200 => "杂物"
+         * LK_ItemSubType_1205 => "心材"
+         * LK_ItemSubType_1206 => "绳索"
+         * LK_Item_Filter_Type_Food   => "食"
+         * LK_Item_Filter_Type_Medicine       => "药"
+         * LK_Item_Filter_Type_Equipment      => "装"
+         * LK_Item_Filter_Type_Book    => "书"
+         * LK_Item_Filter_Type_Make    => "制"
+         * LK_Item_Filter_Type_Material       => "材"
+         * LK_Item_Filter_Type_Other   => "它"
+         * LK_Inventory => "行囊"
+         * LK_Warehouse => "私库"
+         * LK_Treasury  => "公库"
+         * LK_StockStorageGoodsShelf  => "货架"
+         * LK_Trough    => "饲槽"
+         */
         private static SortedDictionary<int, string> equipFilterName = new SortedDictionary<int, string>()
         {
-            { 1, ToLoc(LanguageKey.LK_Equip_Slot_Name_Short_Weapon) },
-            { 3, ToLoc(LanguageKey.LK_Equip_Slot_Name_Short_Torso) },
+            { 1, "兵" },
+            { 3, "甲" },
         };
         private static SortedDictionary<int, string> resFilterName = new SortedDictionary<int, string>()
         {
-            { 1, ToLoc(LanguageKey.LK_Item_Filter_SubType_Material_Food) },
-            { 2, ToLoc(LanguageKey.LK_Item_Filter_SubType_Material_Wood) },
-            { 3, ToLoc(LanguageKey.LK_Item_Filter_SubType_Material_Metal) },
-            { 4, ToLoc(LanguageKey.LK_Item_Filter_SubType_Material_Jade) },
-            { 5, ToLoc(LanguageKey.LK_Item_Filter_SubType_Material_Fabric) },
-            { 6, ToLoc(LanguageKey.LK_Item_Filter_SubType_Material_Medicine) },
+            { 1, "食" },
+            { 2, "木" },
+            { 3, "铁" },
+            { 4, "玉" },
+            { 5, "织" },
+            { 6, "药" },
         };
 
         private static SortedDictionary<int, string> foodTypeName = new SortedDictionary<int, string>()
         { 
             // 菜
-            { 700, ToLoc(LanguageKey.LK_Item_Filter_SubType_Food_Vegetarian) },
-            { 701, ToLoc(LanguageKey.LK_Item_Filter_SubType_Food_Meat) },
-            { 900, ToLoc(LanguageKey.LK_Item_Filter_SubType_Food_Tea) },
-            { 901, ToLoc(LanguageKey.LK_Item_Filter_SubType_Food_Wine) },
+            { 700, "素" },
+            { 701, "荤" },
+            { 900, "茶" },
+            { 901, "酒" },
         };
         private static SortedDictionary<int, string> bookTypeName = new SortedDictionary<int, string>()
         { 
             // 书
-            { 1000, ToLoc(LanguageKey.LK_Item_Filter_SubType_Book_LifeSkill) },
-            { 1001, ToLoc(LanguageKey.LK_Item_Filter_SubType_Book_CombatSkill) },
+            { 1000, "技" },
+            { 1001, "武" },
         };
 
         private static SortedDictionary<int, string> miscTypeName = new SortedDictionary<int, string>()
         {
             // 其他 心
-            { 1100, ToLoc(LanguageKey.LK_ItemSubType_1100) },
-            { 1200, ToLoc(LanguageKey.LK_ItemSubType_1200) },
-            { 1205, ToLoc(LanguageKey.LK_ItemSubType_1205) },
-            { 1206, ToLoc(LanguageKey.LK_ItemSubType_1206) },
+            { 1100, "促织" },
+            { 1200, "杂物" },
+            { 1205, "心材" },
+            { 1206, "绳索" },
         };
 
         private static SortedDictionary<int, (SortedDictionary<int, string> sub, string name)> filterName = new SortedDictionary<int, (SortedDictionary<int, string> sub, string name)>()
         {
-            { 1, (foodTypeName, ToLoc(LanguageKey.LK_Item_Filter_Type_Food)) }, // itemtype 7 9
-            { 2, (null, ToLoc(LanguageKey.LK_Item_Filter_Type_Medicine)) }, // itemtype 8
-            { 3, (equipFilterName, ToLoc(LanguageKey.LK_Item_Filter_Type_Equipment)) }, // itemtype 01234
-            { 4, (bookTypeName, ToLoc(LanguageKey.LK_Item_Filter_Type_Book)) },  // itemtype 10
-            { 5, (null, ToLoc(LanguageKey.LK_Item_Filter_Type_Make)) }, //  itemtype 6
-            { 6, (resFilterName, ToLoc(LanguageKey.LK_Item_Filter_Type_Material)) },  // itemtype 5
-            { 7, (miscTypeName, ToLoc(LanguageKey.LK_Item_Filter_Type_Other)) },  // itemtype 大于10 其他 12
+            { 1, (foodTypeName, "食") }, // itemtype 7 9
+            { 2, (null, "药") }, // itemtype 8
+            { 3, (equipFilterName, "装") }, // itemtype 01234
+            { 4, (bookTypeName, "书") },  // itemtype 10
+            { 5, (null, "制") }, //  itemtype 6
+            { 6, (resFilterName, "材") },  // itemtype 5
+            { 7, (miscTypeName, "它") },  // itemtype 大于10 其他 12
         };
         private static List<int> filterSort = new List<int>() { 1, 2, 3, 4, 6, 5, 7 };
 
@@ -628,7 +661,7 @@ namespace WeightAnalyze
 			if (inventoryText != null)
             {
                 if (invItems != null)
-                    inventoryText.text = UpdateSource(ToLoc(LanguageKey.LK_Inventory), inventoryWeights, invItems);
+                    inventoryText.text = UpdateSource("行囊", inventoryWeights, invItems);
                 else
                     inventoryText.text = "";
             }
@@ -637,7 +670,7 @@ namespace WeightAnalyze
             if (warehouseText != null)
             {
                 if (wareItems != null)
-                    warehouseText.text = UpdateSource(ToLoc(LanguageKey.LK_Warehouse), warehouseWeights, wareItems);
+                    warehouseText.text = UpdateSource("私库", warehouseWeights, wareItems);
                 else
                     warehouseText.text = "";
             }
@@ -646,7 +679,7 @@ namespace WeightAnalyze
             if (treasuryText != null)
             {
                 if (treasuryItems != null)
-                    treasuryText.text = UpdateSource(ToLoc(LanguageKey.LK_Treasury), treasuryWeights, treasuryItems);
+                    treasuryText.text = UpdateSource("公库", treasuryWeights, treasuryItems);
                 else
                     treasuryText.text = "";
             }
@@ -655,9 +688,9 @@ namespace WeightAnalyze
             if (stockText != null)
             {
                 if (stockItems != null)
-                    stockText.text = UpdateSource(ToLoc(LanguageKey.LK_StockStorageGoodsShelf), stockWeights, stockItems);
+                    stockText.text = UpdateSource("货架", stockWeights, stockItems);
                 else if (troughItems != null)
-                    stockText.text = UpdateSource(ToLoc(LanguageKey.LK_Trough), stockWeights, troughItems);
+                    stockText.text = UpdateSource("饲槽", stockWeights, troughItems);
                 else
                     stockText.text = "";
             }
