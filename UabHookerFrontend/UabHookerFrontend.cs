@@ -141,8 +141,9 @@ namespace UabHooker
         private static Dictionary<string, Texture2D> _texCache = new Dictionary<string, Texture2D>();
 
         // ← 日志开关
-        private static bool logReplace = true;
-        private static bool logEntryUab = false;
+        private static bool logScan = false;
+		private static bool logReplace = true;
+		private static bool logEntryUab = false;
         private static bool logEntryImg = false;
         private static bool logEntrySpineImg = false;
         private static bool logEntryAtlas = false;
@@ -247,7 +248,7 @@ namespace UabHooker
                     if (!_replaceUab.TryGetValue(name, out var list))
                         _replaceUab[name] = list = new List<FileReplaceInfo>();
                     list.Add(info);
-                    MyUtils.MyLog($"配置[HookUab] {name}[{list.Count-1}] -> {to}");
+                    if(logScan) MyUtils.MyLog($"配置[HookUab] {name}[{list.Count-1}] -> {to}");
                 }
             }
 
@@ -271,7 +272,7 @@ namespace UabHooker
                         if (!_replaceUab.TryGetValue(bundleName, out var list))
                             _replaceUab[bundleName] = list = new List<FileReplaceInfo>();
                         list.Add(uabInfo);
-                        MyUtils.MyLog($"配置[HookImg->整包] {bundleName}[{list.Count-1}] -> {to}");
+						if (logScan) MyUtils.MyLog($"配置[HookImg->整包] {bundleName}[{list.Count-1}] -> {to}");
                         continue;
                     }
 
@@ -297,7 +298,7 @@ namespace UabHooker
                             map[assetPath] = innerList = new List<FileReplaceInfo>();
                         innerList.Add(imgInfo);
                         string sizeInfo = imgInfo.w > 0 && imgInfo.h > 0 ? $" w={imgInfo.w} h={imgInfo.h}" : "";
-                        MyUtils.MyLog($"配置[HookImg] [{bundleName}] {assetPath}[{innerList.Count-1}] -> {imgTo}{sizeInfo}");
+						if (logScan) MyUtils.MyLog($"配置[HookImg] [{bundleName}] {assetPath}[{innerList.Count-1}] -> {imgTo}{sizeInfo}");
                     }
                 }
             }
@@ -332,7 +333,7 @@ namespace UabHooker
                         if (!skelMap.TryGetValue(imgName, out var innerList))
                             skelMap[imgName] = innerList = new List<FileReplaceInfo>();
                         innerList.Add(imgInfo);
-                        MyUtils.MyLog($"配置[HookSpineImg] [{skelName}] {imgName}[{innerList.Count-1}] -> {to}");
+						if (logScan) MyUtils.MyLog($"配置[HookSpineImg] [{skelName}] {imgName}[{innerList.Count-1}] -> {to}");
                     }
                 }
             }
@@ -383,7 +384,7 @@ namespace UabHooker
                         string extInfo = "";
                         if (info.w > 0 && info.h > 0) extInfo += $" w={info.w} h={info.h}";
                         if (info.hasPos) extInfo += $" pos({info.posX},{info.posY})";
-                        MyUtils.MyLog($"配置[HookAtlas] [{atlasName}] {spriteName} -> {to}{extInfo}");
+						if (logScan) MyUtils.MyLog($"配置[HookAtlas] [{atlasName}] {spriteName} -> {to}{extInfo}");
                     }
                 }
             }
@@ -410,7 +411,7 @@ namespace UabHooker
                         _replaceSpine[spineName] = list = new List<SpineReplaceInfo>();
                     list.Add(info);
                     string objDirLog = string.IsNullOrEmpty(info.objDir) ? "" : $" objDir={info.objDir}";
-                    MyUtils.MyLog($"配置[HookSpine] {spineName}[{list.Count-1}] -> atlas={atlasTo}, skel={skelTo}{objDirLog}");
+					if (logScan) MyUtils.MyLog($"配置[HookSpine] {spineName}[{list.Count-1}] -> atlas={atlasTo}, skel={skelTo}{objDirLog}");
                 }
             }
 
@@ -449,7 +450,7 @@ namespace UabHooker
                     if (!string.IsNullOrEmpty(info.coverSkelPath))
                         logExtra += " coverSkel=" + info.coverSkelPath;
                     string objDirLog = string.IsNullOrEmpty(info.objDir) ? "" : $" objDir={info.objDir}";
-                    MyUtils.MyLog($"配置[HookAvatar] {spineName}[{list.Count-1}] -> atlas={atlasTo}, skel={skelTo}" + logExtra + objDirLog);
+					if (logScan) MyUtils.MyLog($"配置[HookAvatar] {spineName}[{list.Count-1}] -> atlas={atlasTo}, skel={skelTo}" + logExtra + objDirLog);
                 }
             }
         }
@@ -460,8 +461,9 @@ namespace UabHooker
         public override void Dispose() { harmony?.UnpatchSelf(); }
         public override void OnModSettingUpdate()
         {
-            ModManager.GetSetting(ModIdStr, "logReplace", ref logReplace);
-            ModManager.GetSetting(ModIdStr, "logEntryUab", ref logEntryUab);
+            ModManager.GetSetting(ModIdStr, "logScan", ref logScan);
+			ModManager.GetSetting(ModIdStr, "logReplace", ref logReplace);
+			ModManager.GetSetting(ModIdStr, "logEntryUab", ref logEntryUab);
             ModManager.GetSetting(ModIdStr, "logEntryImg", ref logEntryImg);
             ModManager.GetSetting(ModIdStr, "logEntrySpineImg", ref logEntrySpineImg);
             ModManager.GetSetting(ModIdStr, "logEntryAtlas", ref logEntryAtlas);
@@ -617,19 +619,6 @@ namespace UabHooker
                         sg.Initialize(true);
                         break;
                     }
-                }
-            }
-
-            // HookAvatar: 找到场景中所有 Avatar 组件触发 Refresh
-            if (_activeAvatar.Count > 0)
-            {
-                var avatars = UnityEngine.Object.FindObjectsOfType<Game.Components.Avatar.Avatar>();
-                foreach (var av in avatars)
-                {
-                    if (av == null || !av.isActiveAndEnabled || av.Data == null) continue;
-                    if (logReplace)
-                        MyUtils.MyLog($"[HookAvatar] 设置变更后触发刷新: avatarId={av.Data.AvatarId}");
-                    av.Refresh();
                 }
             }
         }
