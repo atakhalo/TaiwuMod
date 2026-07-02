@@ -18,8 +18,9 @@ namespace ModSet
     public class ModSetFrontendPlugin : TaiwuRemakePlugin
     {
         private Harmony harmony;
+		private static bool modReSet = false;
 
-        public override void Initialize()
+		public override void Initialize()
         {
             MyUtils.modName = nameof(ModSet);
             MyUtils.MyLog($"Initialize");
@@ -35,18 +36,19 @@ namespace ModSet
         }
 
         public override void OnModSettingUpdate()
-        {
-        }
+		{
+			ModManager.GetSetting(ModIdStr, "modReSet", ref modReSet);
+		}
 
-        /// ================================================================
-        /// 补丁 1：Refresh Postfix
-        /// 目标：ModUploadEditPanel.Refresh() 完成后，将 _tempModSettingEntries
-        ///       替换为从 Config.Lua 原始数据解析的默认设置项。
-        /// 原因：原逻辑将 _curEditModInfo.ModSettingEntries（已加载 Settings.Lua
-        ///       的用户当前值）复制到 _tempModSettingEntries，导致编辑器中看到
-        ///       的是用户当前设置而非默认设置。
-        /// ================================================================
-        [HarmonyPostfix]
+		/// ================================================================
+		/// 补丁 1：Refresh Postfix
+		/// 目标：ModUploadEditPanel.Refresh() 完成后，将 _tempModSettingEntries
+		///       替换为从 Config.Lua 原始数据解析的默认设置项。
+		/// 原因：原逻辑将 _curEditModInfo.ModSettingEntries（已加载 Settings.Lua
+		///       的用户当前值）复制到 _tempModSettingEntries，导致编辑器中看到
+		///       的是用户当前设置而非默认设置。
+		/// ================================================================
+		[HarmonyPostfix]
         [HarmonyPatch(typeof(ModUploadEditPanel), "Refresh")]
         public static void Postfix_Refresh(object __instance)
         {
@@ -195,6 +197,8 @@ namespace ModSet
         [HarmonyPatch(typeof(ModManager), "ReadModInfo")]
         public static void Postfix_ReadModInfo(ref ModInfoWithDisplayData __result, string configPath, bool loadOnRead)
         {
+			if(!modReSet) return;
+
             if (__result == null || !loadOnRead || string.IsNullOrEmpty(__result.Title))
                 return;
 
@@ -255,7 +259,9 @@ namespace ModSet
         [HarmonyPatch(typeof(ModManager), "SaveModSettings")]
         public static void Postfix_SaveModSettings(bool onlySaveCommonSetting)
         {
-            if (onlySaveCommonSetting)
+			if (!modReSet) return;
+
+			if (onlySaveCommonSetting)
                 return;
 
             foreach (var kv in ModManager.LocalMods)
