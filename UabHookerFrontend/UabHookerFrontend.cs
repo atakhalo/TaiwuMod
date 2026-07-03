@@ -581,46 +581,6 @@ namespace UabHooker
                 if (inner.Count > 0)
                     _activeAtlas[atlasKv.Key] = inner;
             }
-
-            // 重建后启动协程延迟一帧刷新场景中的 SkeletonGraphic，使新配置立即生效
-            if (GameApp.Instance != null)
-                GameApp.Instance.StartCoroutine(DelayedRefresh());
-        }
-
-        private static IEnumerator DelayedRefresh()
-        {
-            yield return null;
-            RefreshMatchingSkeletonGraphics();
-        }
-
-        /// <summary>
-        /// 遍历场景中所有已激活的 SkeletonGraphic/Avatar，对匹配当前 _activeSpine / _activeAvatar 的
-        /// 触发重新 Initialize/Refresh，使切换设置后立即生效（而不是等下次打开界面）。
-        /// </summary>
-        private static void RefreshMatchingSkeletonGraphics()
-        {
-            // HookSpine
-            if (_activeSpine.Count > 0)
-            {
-                var sgs = UnityEngine.Object.FindObjectsOfType<SkeletonGraphic>();
-                foreach (var sg in sgs)
-                {
-                    if (sg == null || sg.skeletonDataAsset == null) continue;
-                    string sdaName = sg.skeletonDataAsset.name;
-                    if (string.IsNullOrEmpty(sdaName)) continue;
-
-                    foreach (var kv in _activeSpine)
-                    {
-                        if (sdaName.IndexOf(kv.Key, StringComparison.OrdinalIgnoreCase) < 0) continue;
-                        if (!MatchesObjDir(sg, kv.Value.objDir)) continue;
-
-                        if (logReplace)
-                            MyUtils.MyLog($"[HookSpine] 设置变更后重新初始化: [{kv.Key}] sg={sg.name} sda={sdaName}");
-                        sg.Initialize(true);
-                        break;
-                    }
-                }
-            }
         }
 
         // ═══════════════════════════════════════════════════════════════
