@@ -155,8 +155,9 @@ namespace UabHooker
             MyUtils.modName = nameof(UabHooker);
             MyUtils.MyLog("Initialize");
 
-            // 扫描所有启用mod的uabhook.xml
-            ScanConfigs();
+			UpdateSetting();
+			// 扫描所有启用mod的uabhook.xml
+			ScanConfigs();
 
             harmony = Harmony.CreateAndPatchAll(typeof(UabHookerFrontendPlugin));
 
@@ -227,6 +228,44 @@ namespace UabHooker
             return Path.GetFullPath(Path.Combine(baseDir, to));
         }
 
+        // ═══════════════════════════════════════════════════════════════
+        //  tofolder 自动扫描辅助方法
+        // ═══════════════════════════════════════════════════════════════
+
+        private static bool IsImageFile(string path)
+        {
+            string ext = Path.GetExtension(path);
+            return ext.Equals(".png", StringComparison.OrdinalIgnoreCase) ||
+                   ext.Equals(".jpg", StringComparison.OrdinalIgnoreCase) ||
+                   ext.Equals(".jpeg", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsSpineSkelFile(string path)
+        {
+            string ext = Path.GetExtension(path);
+            return ext.Equals(".json", StringComparison.OrdinalIgnoreCase) ||
+                   ext.Equals(".skel", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsSpineAtlasFile(string path)
+        {
+            string ext = Path.GetExtension(path);
+            return ext.Equals(".atlas", StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// 计算文件相对于文件夹的路径（不含扩展名），使用 / 分隔符
+        /// </summary>
+        private static string GetRelPathNoExt(string absFolder, string filePath)
+        {
+            string relPath = Path.GetRelativePath(absFolder, filePath);
+            string relDir = Path.GetDirectoryName(relPath) ?? "";
+            string fileNameNoExt = Path.GetFileNameWithoutExtension(relPath);
+            if (string.IsNullOrEmpty(relDir))
+                return fileNameNoExt;
+            return relDir.Replace('\\', '/') + "/" + fileNameNoExt;
+        }
+
         public void ParseConfig(string configPath, string baseDir, string modIdStr)
         {
             XDocument doc = XDocument.Load(configPath);
@@ -282,23 +321,59 @@ namespace UabHooker
                     foreach (var img in uab.Elements("img"))
                     {
                         string assetPath = (string)img.Attribute("assetPath") ?? "";
-                        string imgTo = ResolveToPath((string)img.Attribute("to") ?? "", baseDir);
+                        string tofolder = (string)img.Attribute("tofolder") ?? "";
                         string imgEnableRaw = (string)img.Attribute("enable") ?? "true";
+
+                        // tofolder 模式：自动扫描文件夹下的所有图片
+                        if (!string.IsNullOrEmpty(tofolder))
+                        {
+                            string absToFolder = Path.Combine(baseDir, tofolder);
+                            if (!Directory.Exists(absToFolder)) continue;
+                            var enableCond = ParseEnableCondition(imgEnableRaw, modIdStr);
+                            if (enableCond.type == EnableCondition.CondType.Static && !enableCond.staticValue)
+                                continue;
+
+                            var imageFiles = Directory.GetFiles(absToFolder, "*", SearchOption.AllDirectories)
+                                .Where(f => IsImageFile(f));
+
+                            foreach (var filePath in imageFiles)
+                            {
+                                string relPathNoExt = GetRelPathNoExt(absToFolder, filePath);
+                                string fullAssetPath = assetPath + relPathNoExt;
+
+                                var fi = new FileReplaceInfo { filePath = filePath };
+                                fi.enableCond = enableCond;
+                                int wVal, hVal;
+                                if (img.Attribute("w") != null && int.TryParse((string)img.Attribute("w"), out wVal))
+                                    fi.w = wVal;
+                                if (img.Attribute("h") != null && int.TryParse((string)img.Attribute("h"), out hVal))
+                                    fi.h = hVal;
+
+                                if (!map.TryGetValue(fullAssetPath, out var innerList))
+                                    map[fullAssetPath] = innerList = new List<FileReplaceInfo>();
+                                innerList.Add(fi);
+                                string sizeInfo = fi.w > 0 && fi.h > 0 ? $" w={fi.w} h={fi.h}" : "";
+                                if (logScan) MyUtils.MyLog($"配置[HookImg][自动扫描] [{bundleName}] {fullAssetPath} -> {filePath}{sizeInfo}");
+                            }
+                            continue;
+                        }
+
+                        string imgTo = ResolveToPath((string)img.Attribute("to") ?? "", baseDir);
                         if (string.IsNullOrEmpty(assetPath) || string.IsNullOrEmpty(imgTo)) continue;
                         var imgInfo = new FileReplaceInfo { filePath = imgTo };
                         imgInfo.enableCond = ParseEnableCondition(imgEnableRaw, modIdStr);
                         if (imgInfo.enableCond.type == EnableCondition.CondType.Static && !imgInfo.enableCond.staticValue)
                             continue;
-                        int wVal, hVal;
-                        if (img.Attribute("w") != null && int.TryParse((string)img.Attribute("w"), out wVal))
-                            imgInfo.w = wVal;
-                        if (img.Attribute("h") != null && int.TryParse((string)img.Attribute("h"), out hVal))
-                            imgInfo.h = hVal;
-                        if (!map.TryGetValue(assetPath, out var innerList))
-                            map[assetPath] = innerList = new List<FileReplaceInfo>();
-                        innerList.Add(imgInfo);
-                        string sizeInfo = imgInfo.w > 0 && imgInfo.h > 0 ? $" w={imgInfo.w} h={imgInfo.h}" : "";
-						if (logScan) MyUtils.MyLog($"配置[HookImg] [{bundleName}] {assetPath}[{innerList.Count-1}] -> {imgTo}{sizeInfo}");
+                        int wVal2, hVal2;
+                        if (img.Attribute("w") != null && int.TryParse((string)img.Attribute("w"), out wVal2))
+                            imgInfo.w = wVal2;
+                        if (img.Attribute("h") != null && int.TryParse((string)img.Attribute("h"), out hVal2))
+                            imgInfo.h = hVal2;
+                        if (!map.TryGetValue(assetPath, out var innerList2))
+                            map[assetPath] = innerList2 = new List<FileReplaceInfo>();
+                        innerList2.Add(imgInfo);
+                        string sizeInfo2 = imgInfo.w > 0 && imgInfo.h > 0 ? $" w={imgInfo.w} h={imgInfo.h}" : "";
+						if (logScan) MyUtils.MyLog($"配置[HookImg] [{bundleName}] {assetPath}[{innerList2.Count-1}] -> {imgTo}{sizeInfo2}");
                     }
                 }
             }
@@ -344,11 +419,41 @@ namespace UabHooker
                 foreach (var atlas in hook.Elements("atlas"))
                 {
                     string atlasName = (string)atlas.Attribute("name") ?? "";
+                    string tofolder = (string)atlas.Attribute("tofolder") ?? "";
                     bool atlasEnable = (bool?)atlas.Attribute("enable") ?? true;
                     if (!atlasEnable || string.IsNullOrEmpty(atlasName)) continue;
 
                     if (!_sourceAtlas.TryGetValue(atlasName, out var map))
                         _sourceAtlas[atlasName] = map = new Dictionary<string, List<SpriteReplaceInfo>>();
+
+                    // tofolder 模式：自动扫描文件夹，文件名（不含扩展名）作为 sprite name
+                    if (!string.IsNullOrEmpty(tofolder))
+                    {
+                        string absToFolder = Path.Combine(baseDir, tofolder);
+                        if (!Directory.Exists(absToFolder)) continue;
+
+                        var imageFiles = Directory.GetFiles(absToFolder, "*", SearchOption.AllDirectories)
+                            .Where(f => IsImageFile(f));
+
+                        foreach (var filePath in imageFiles)
+                        {
+                            string spriteName = Path.GetFileNameWithoutExtension(filePath);
+
+                            var info = new SpriteReplaceInfo { filePath = filePath };
+                            info.enableCond = new EnableCondition(); // 默认启用
+                            int wVal, hVal;
+                            if (atlas.Attribute("w") != null && int.TryParse((string)atlas.Attribute("w"), out wVal))
+                                info.w = wVal;
+                            if (atlas.Attribute("h") != null && int.TryParse((string)atlas.Attribute("h"), out hVal))
+                                info.h = hVal;
+
+                            if (!map.TryGetValue(spriteName, out var list))
+                                map[spriteName] = list = new List<SpriteReplaceInfo>();
+                            list.Add(info);
+                            if (logScan) MyUtils.MyLog($"配置[HookAtlas][自动扫描] [{atlasName}] {spriteName} -> {filePath}");
+                        }
+                        continue;
+                    }
 
                     foreach (var sprite in atlas.Elements("sprite"))
                     {
@@ -395,23 +500,60 @@ namespace UabHooker
                 foreach (var spine in hook.Elements("spine"))
                 {
                     string spineName = (string)spine.Attribute("name") ?? "";
+                    string tofolder = (string)spine.Attribute("tofolder") ?? "";
+                    string enableRaw = (string)spine.Attribute("enable") ?? "true";
+
+                    // tofolder 模式：扫描文件夹下所有 .json/.skel，自动配对同名的 .atlas
+                    if (!string.IsNullOrEmpty(tofolder))
+                    {
+                        string absToFolder = Path.Combine(baseDir, tofolder);
+                        if (!Directory.Exists(absToFolder)) continue;
+
+                        var skelFiles = Directory.GetFiles(absToFolder, "*", SearchOption.AllDirectories)
+                            .Where(f => IsSpineSkelFile(f));
+
+                        foreach (var skelFilePath in skelFiles)
+                        {
+                            string nameNoExt = Path.GetFileNameWithoutExtension(skelFilePath);
+                            string skelDir = Path.GetDirectoryName(skelFilePath);
+                            string atlasPath = Path.Combine(skelDir, nameNoExt + ".atlas");
+
+                            if (!File.Exists(atlasPath))
+                            {
+                                if (logScan) MyUtils.MyLog($"[HookSpine][自动扫描] 跳过 {skelFilePath}：未找到同名的 .atlas 文件");
+                                continue;
+                            }
+
+                            var info = new SpineReplaceInfo { atlasPath = atlasPath, skelPath = skelFilePath };
+                            info.enableCond = ParseEnableCondition(enableRaw, modIdStr);
+                            if (info.enableCond.type == EnableCondition.CondType.Static && !info.enableCond.staticValue)
+                                continue;
+                            info.objDir = (string)spine.Attribute("objDir") ?? "";
+
+                            if (!_replaceSpine.TryGetValue(nameNoExt, out var list))
+                                _replaceSpine[nameNoExt] = list = new List<SpineReplaceInfo>();
+                            list.Add(info);
+                            if (logScan) MyUtils.MyLog($"配置[HookSpine][自动扫描] {nameNoExt}[{list.Count-1}] -> atlas={atlasPath}, skel={skelFilePath}");
+                        }
+                        continue;
+                    }
+
                     string atlasTo = ResolveToPath((string)spine.Attribute("atlas") ?? "", baseDir);
                     string skelTo = ResolveToPath((string)spine.Attribute("skel") ?? "", baseDir);
-                    string enableRaw = (string)spine.Attribute("enable") ?? "true";
                     if (string.IsNullOrEmpty(spineName) || string.IsNullOrEmpty(atlasTo) || string.IsNullOrEmpty(skelTo))
                         continue;
 
-                    var info = new SpineReplaceInfo { atlasPath = atlasTo, skelPath = skelTo };
-                    info.enableCond = ParseEnableCondition(enableRaw, modIdStr);
-                    if (info.enableCond.type == EnableCondition.CondType.Static && !info.enableCond.staticValue)
+                    var info2 = new SpineReplaceInfo { atlasPath = atlasTo, skelPath = skelTo };
+                    info2.enableCond = ParseEnableCondition(enableRaw, modIdStr);
+                    if (info2.enableCond.type == EnableCondition.CondType.Static && !info2.enableCond.staticValue)
                         continue;
-                    info.objDir = (string)spine.Attribute("objDir") ?? "";
+                    info2.objDir = (string)spine.Attribute("objDir") ?? "";
 
-                    if (!_replaceSpine.TryGetValue(spineName, out var list))
-                        _replaceSpine[spineName] = list = new List<SpineReplaceInfo>();
-                    list.Add(info);
-                    string objDirLog = string.IsNullOrEmpty(info.objDir) ? "" : $" objDir={info.objDir}";
-					if (logScan) MyUtils.MyLog($"配置[HookSpine] {spineName}[{list.Count-1}] -> atlas={atlasTo}, skel={skelTo}{objDirLog}");
+                    if (!_replaceSpine.TryGetValue(spineName, out var list2))
+                        _replaceSpine[spineName] = list2 = new List<SpineReplaceInfo>();
+                    list2.Add(info2);
+                    string objDirLog = string.IsNullOrEmpty(info2.objDir) ? "" : $" objDir={info2.objDir}";
+					if (logScan) MyUtils.MyLog($"配置[HookSpine] {spineName}[{list2.Count-1}] -> atlas={atlasTo}, skel={skelTo}{objDirLog}");
                 }
             }
 
@@ -421,36 +563,105 @@ namespace UabHooker
                 foreach (var spine in hook.Elements("spine"))
                 {
                     string spineName = (string)spine.Attribute("name") ?? "";
+                    string tofolder = (string)spine.Attribute("tofolder") ?? "";
+                    string avatarType = (string)spine.Attribute("type") ?? "";
+                    string enableRaw = (string)spine.Attribute("enable") ?? "true";
+
+                    // tofolder 模式
+                    if (!string.IsNullOrEmpty(tofolder))
+                    {
+                        string absToFolder = Path.Combine(baseDir, tofolder);
+                        if (!Directory.Exists(absToFolder)) continue;
+
+                        var skelFiles = Directory.GetFiles(absToFolder, "*", SearchOption.AllDirectories)
+                            .Where(f => IsSpineSkelFile(f));
+
+                        foreach (var skelFilePath in skelFiles)
+                        {
+                            string nameNoExt = Path.GetFileNameWithoutExtension(skelFilePath);
+                            string skelDir = Path.GetDirectoryName(skelFilePath);
+                            string atlasPath = Path.Combine(skelDir, nameNoExt + ".atlas");
+
+                            if (!File.Exists(atlasPath))
+                            {
+                                if (logScan) MyUtils.MyLog($"[HookAvatar][自动扫描] 跳过 {skelFilePath}：未找到同名的 .atlas 文件");
+                                continue;
+                            }
+
+                            var info = new SpineReplaceInfo { atlasPath = atlasPath, skelPath = skelFilePath };
+                            info.enableCond = ParseEnableCondition(enableRaw, modIdStr);
+                            if (info.enableCond.type == EnableCondition.CondType.Static && !info.enableCond.staticValue)
+                                continue;
+                            info.objDir = (string)spine.Attribute("objDir") ?? "";
+
+                            // cloth 类型：尝试查找 _cover 文件
+                            if (avatarType == "cloth")
+                            {
+                                string coverSkelPath = Path.Combine(skelDir, nameNoExt + "_cover" + Path.GetExtension(skelFilePath));
+                                string coverAtlasPath = Path.Combine(skelDir, nameNoExt + "_cover.atlas");
+
+                                if (File.Exists(coverSkelPath) && File.Exists(coverAtlasPath))
+                                {
+                                    info.coverSkelPath = coverSkelPath;
+                                    info.coverAtlasPath = coverAtlasPath;
+                                    if (logScan) MyUtils.MyLog($"[HookAvatar][自动扫描] 找到 cover 文件: {coverSkelPath}");
+                                }
+                                else
+                                {
+                                    // 尝试查找 _coverkeep.txt
+                                    string coverKeepFile = Path.Combine(skelDir, nameNoExt + "_coverkeep.txt");
+                                    if (File.Exists(coverKeepFile))
+                                    {
+                                        info.coverKeep = true;
+                                        if (logScan) MyUtils.MyLog($"[HookAvatar][自动扫描] 找到 coverkeep 标记: {coverKeepFile}");
+                                    }
+                                    // 否则 coverAtlas/coverSkel 保持为空（隐藏 cover）
+                                }
+                            }
+
+                            if (!_replaceAvatar.TryGetValue(nameNoExt, out var list))
+                                _replaceAvatar[nameNoExt] = list = new List<SpineReplaceInfo>();
+                            list.Add(info);
+
+                            string logExtra = "";
+                            if (info.coverKeep) logExtra += " coverKeep=true";
+                            if (!string.IsNullOrEmpty(info.coverAtlasPath)) logExtra += " coverAtlas=" + info.coverAtlasPath;
+                            if (!string.IsNullOrEmpty(info.coverSkelPath)) logExtra += " coverSkel=" + info.coverSkelPath;
+                            string objDirLog = string.IsNullOrEmpty(info.objDir) ? "" : $" objDir={info.objDir}";
+                            if (logScan) MyUtils.MyLog($"配置[HookAvatar][自动扫描] {nameNoExt}[{list.Count-1}] -> atlas={atlasPath}, skel={skelFilePath}" + logExtra + objDirLog);
+                        }
+                        continue;
+                    }
+
                     string atlasTo = ResolveToPath((string)spine.Attribute("atlas") ?? "", baseDir);
                     string skelTo = ResolveToPath((string)spine.Attribute("skel") ?? "", baseDir);
-                    string enableRaw = (string)spine.Attribute("enable") ?? "true";
                     if (string.IsNullOrEmpty(spineName) || string.IsNullOrEmpty(atlasTo) || string.IsNullOrEmpty(skelTo))
                         continue;
 
-                    var info = new SpineReplaceInfo { atlasPath = atlasTo, skelPath = skelTo };
-                    info.enableCond = ParseEnableCondition(enableRaw, modIdStr);
-                    if (info.enableCond.type == EnableCondition.CondType.Static && !info.enableCond.staticValue)
+                    var info2 = new SpineReplaceInfo { atlasPath = atlasTo, skelPath = skelTo };
+                    info2.enableCond = ParseEnableCondition(enableRaw, modIdStr);
+                    if (info2.enableCond.type == EnableCondition.CondType.Static && !info2.enableCond.staticValue)
                         continue;
-                    info.objDir = (string)spine.Attribute("objDir") ?? "";
+                    info2.objDir = (string)spine.Attribute("objDir") ?? "";
 
                     // coverkeep: true=保留原始 cover，不填或 false=隐藏 cover（默认）
                     string coverKeepRaw = (string)spine.Attribute("coverkeep") ?? "false";
-                    bool.TryParse(coverKeepRaw, out info.coverKeep);
+                    bool.TryParse(coverKeepRaw, out info2.coverKeep);
 
                     // coverAtlas/coverSkel: 自定义 cover 资源路径（不为空时替换 cover）
-                    info.coverAtlasPath = ResolveToPath((string)spine.Attribute("coverAtlas") ?? "", baseDir);
-                    info.coverSkelPath = ResolveToPath((string)spine.Attribute("coverSkel") ?? "", baseDir);
+                    info2.coverAtlasPath = ResolveToPath((string)spine.Attribute("coverAtlas") ?? "", baseDir);
+                    info2.coverSkelPath = ResolveToPath((string)spine.Attribute("coverSkel") ?? "", baseDir);
 
-                    if (!_replaceAvatar.TryGetValue(spineName, out var list))
-                        _replaceAvatar[spineName] = list = new List<SpineReplaceInfo>();
-                    list.Add(info);
-                    string logExtra = info.coverKeep ? " coverKeep=true" : "";
-                    if (!string.IsNullOrEmpty(info.coverAtlasPath))
-                        logExtra += " coverAtlas=" + info.coverAtlasPath;
-                    if (!string.IsNullOrEmpty(info.coverSkelPath))
-                        logExtra += " coverSkel=" + info.coverSkelPath;
-                    string objDirLog = string.IsNullOrEmpty(info.objDir) ? "" : $" objDir={info.objDir}";
-					if (logScan) MyUtils.MyLog($"配置[HookAvatar] {spineName}[{list.Count-1}] -> atlas={atlasTo}, skel={skelTo}" + logExtra + objDirLog);
+                    if (!_replaceAvatar.TryGetValue(spineName, out var list2))
+                        _replaceAvatar[spineName] = list2 = new List<SpineReplaceInfo>();
+                    list2.Add(info2);
+                    string logExtra2 = info2.coverKeep ? " coverKeep=true" : "";
+                    if (!string.IsNullOrEmpty(info2.coverAtlasPath))
+                        logExtra2 += " coverAtlas=" + info2.coverAtlasPath;
+                    if (!string.IsNullOrEmpty(info2.coverSkelPath))
+                        logExtra2 += " coverSkel=" + info2.coverSkelPath;
+                    string objDirLog2 = string.IsNullOrEmpty(info2.objDir) ? "" : $" objDir={info2.objDir}";
+					if (logScan) MyUtils.MyLog($"配置[HookAvatar] {spineName}[{list2.Count-1}] -> atlas={atlasTo}, skel={skelTo}" + logExtra2 + objDirLog2);
                 }
             }
         }
@@ -461,20 +672,30 @@ namespace UabHooker
         public override void Dispose() { harmony?.UnpatchSelf(); }
         public override void OnModSettingUpdate()
         {
-            ModManager.GetSetting(ModIdStr, "logScan", ref logScan);
-			ModManager.GetSetting(ModIdStr, "logReplace", ref logReplace);
-			ModManager.GetSetting(ModIdStr, "logEntryUab", ref logEntryUab);
-            ModManager.GetSetting(ModIdStr, "logEntryImg", ref logEntryImg);
-            ModManager.GetSetting(ModIdStr, "logEntrySpineImg", ref logEntrySpineImg);
-            ModManager.GetSetting(ModIdStr, "logEntryAtlas", ref logEntryAtlas);
-            ModManager.GetSetting(ModIdStr, "logEntrySpine", ref logEntrySpine);
-            ModManager.GetSetting(ModIdStr, "logEntryAvatar", ref logEntryAvatar);
+			UpdateSetting();
 
-            // 首次启动时延迟重建，等所有 mod 设置还原
-            GameApp.Instance.StartCoroutine(DelayedRebuild());
+			// 首次启动时延迟重建，等所有 mod 设置还原
+			GameApp.Instance.StartCoroutine(DelayedRebuild());
         }
 
-        private static IEnumerator DelayedRebuild()
+		public void UpdateSetting()
+		{
+			ModManager.GetSetting(ModIdStr, "logScan", ref logScan);
+			ModManager.GetSetting(ModIdStr, "logReplace", ref logReplace);
+			ModManager.GetSetting(ModIdStr, "logEntryUab", ref logEntryUab);
+			ModManager.GetSetting(ModIdStr, "logEntryImg", ref logEntryImg);
+			ModManager.GetSetting(ModIdStr, "logEntrySpineImg", ref logEntrySpineImg);
+			ModManager.GetSetting(ModIdStr, "logEntryAtlas", ref logEntryAtlas);
+			ModManager.GetSetting(ModIdStr, "logEntrySpine", ref logEntrySpine);
+			ModManager.GetSetting(ModIdStr, "logEntryAvatar", ref logEntryAvatar);
+
+			MyUtils.MyLog($"logScan={logScan}, logReplace={logReplace}, logEntryUab={logEntryUab},");
+			MyUtils.MyLog($"logEntryImg={logEntryImg}, logEntryAtlas={logEntryAtlas},");
+			MyUtils.MyLog($"logEntrySpineImg={logEntrySpineImg}, ");
+			MyUtils.MyLog($"logEntrySpine={logEntrySpine}, logEntryAvatar={logEntryAvatar}");
+		}
+
+		private static IEnumerator DelayedRebuild()
         {
             yield return null;
             RebuildActiveEntries();
@@ -724,16 +945,16 @@ namespace UabHooker
             {
                 var info = kv.Value;
 
+                // 用 sda.name 匹配
+                if (sdaName.IndexOf(kv.Key, StringComparison.OrdinalIgnoreCase) < 0)
+                    continue;
+
                 // objDir 过滤：检查对象名/路径后缀（支持 "NpcSpine" 或 "Body/NpcSpine" 等）
                 if (!MatchesObjDir(__instance, info.objDir))
                 {
                     if (logEntrySpine) MyUtils.MyLog($"[HookSpine] objDir不匹配: need={info.objDir} 跳过 [{kv.Key}]");
                     continue;
                 }
-
-                // 用 sda.name 匹配
-                if (sdaName.IndexOf(kv.Key, StringComparison.OrdinalIgnoreCase) < 0)
-                    continue;
 
                 // cacheKey 包含文件路径，保证不同配置（同 name 不同文件）不命中旧缓存
                 string cacheKey = kv.Key + "|" + info.atlasPath + "|" + info.skelPath;
