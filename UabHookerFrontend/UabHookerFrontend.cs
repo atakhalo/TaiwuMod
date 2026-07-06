@@ -111,6 +111,19 @@ namespace UabHooker
             public string coverAtlasPath = ""; // cover .atlas 文件路径（不为空时替换 cover）
             public string coverSkelPath = "";  // cover .skel / .json 文件路径
             public string objDir = ""; // 可选：匹配 GameObject 名称或路径后缀（如 "NpcSpine" 或 "Body/NpcSpine"），用于区分重名 spine
+
+            // ← 随机 Spine 资源池（索引一致，运行时随机选一组）
+            public List<SpineRandomEntry> toRandSpineEntries = new List<SpineRandomEntry>();
+        }
+
+        // ← 一组随机 Spine 资源（skel + atlas，可选 cover）
+        private class SpineRandomEntry
+        {
+            public string skelPath;
+            public string atlasPath;
+            public string coverSkelPath = "";
+            public string coverAtlasPath = "";
+            public bool coverKeep = false;
         }
 
         // ← Spine 运行时资源缓存
@@ -447,16 +460,38 @@ namespace UabHooker
                     {
                         string imgName = (string)img.Attribute("name") ?? "";
                         string to = ResolveToPath((string)img.Attribute("to") ?? "", baseDir);
+                        string torand = (string)img.Attribute("torand") ?? "";
                         string imgEnableRaw = (string)img.Attribute("enable") ?? "true";
-                        if (string.IsNullOrEmpty(imgName) || string.IsNullOrEmpty(to)) continue;
+                        if (string.IsNullOrEmpty(imgName) || (string.IsNullOrEmpty(to) && string.IsNullOrEmpty(torand))) continue;
+
                         var imgInfo = new FileReplaceInfo { filePath = to };
+
+                        // torand 模式
+                        if (!string.IsNullOrEmpty(torand))
+                        {
+                            string absTorand = Path.Combine(baseDir, torand);
+                            if (!Directory.Exists(absTorand)) continue;
+                            var imageFiles = Directory.GetFiles(absTorand, "*", SearchOption.AllDirectories)
+                                .Where(f => IsImageFile(f)).ToList();
+                            if (imageFiles.Count == 0) continue;
+                            imgInfo.toRandFolder = absTorand;
+                            imgInfo.toRandFiles = imageFiles;
+                        }
+
                         imgInfo.enableCond = ParseEnableCondition(imgEnableRaw, modIdStr);
                         if (imgInfo.enableCond.type == EnableCondition.CondType.Static && !imgInfo.enableCond.staticValue)
                             continue;
                         if (!skelMap.TryGetValue(imgName, out var innerList))
                             skelMap[imgName] = innerList = new List<FileReplaceInfo>();
                         innerList.Add(imgInfo);
-						if (logScan) MyUtils.MyLog($"配置[HookSpineImg] [{skelName}] {imgName}[{innerList.Count-1}] -> {to}");
+                        if (imgInfo.toRandFiles.Count > 0)
+                        {
+                            if (logScan) MyUtils.MyLog($"配置[HookSpineImg][随机] [{skelName}] {imgName}[{innerList.Count-1}] -> torand={imgInfo.toRandFolder} ({imgInfo.toRandFiles.Count} files)");
+                        }
+                        else
+                        {
+                            if (logScan) MyUtils.MyLog($"配置[HookSpineImg] [{skelName}] {imgName}[{innerList.Count-1}] -> {to}");
+                        }
                     }
                 }
             }
@@ -570,7 +605,51 @@ namespace UabHooker
                 {
                     string spineName = (string)spine.Attribute("name") ?? "";
                     string tofolder = (string)spine.Attribute("tofolder") ?? "";
+                    string torand = (string)spine.Attribute("torand") ?? "";
                     string enableRaw = (string)spine.Attribute("enable") ?? "true";
+
+                    // torand 模式：扫描文件夹，以骨骼文件为主配对 atlas，运行时随机选
+                    if (!string.IsNullOrEmpty(torand))
+                    {
+                        string absTorand = Path.Combine(baseDir, torand);
+                        if (!Directory.Exists(absTorand)) continue;
+
+                        var skelFiles = Directory.GetFiles(absTorand, "*", SearchOption.AllDirectories)
+                            .Where(f => IsSpineSkelFile(f));
+
+                        var entries = new List<SpineRandomEntry>();
+                        foreach (var skelFilePath in skelFiles)
+                        {
+                            string nameNoExt = Path.GetFileNameWithoutExtension(skelFilePath);
+                            string skelDir = Path.GetDirectoryName(skelFilePath);
+                            string atlasPath = Path.Combine(skelDir, nameNoExt + ".atlas");
+                            if (!File.Exists(atlasPath)) continue;
+
+                            var entry = new SpineRandomEntry
+                            {
+                                skelPath = skelFilePath,
+                                atlasPath = atlasPath
+                            };
+                            entries.Add(entry);
+                            if (logScan) MyUtils.MyLog($"[HookSpine][随机] 发现资源: skel={skelFilePath}, atlas={atlasPath}");
+                        }
+
+                        if (entries.Count == 0) continue;
+
+                        var info = new SpineReplaceInfo();
+                        info.toRandSpineEntries = entries;
+                        info.enableCond = ParseEnableCondition(enableRaw, modIdStr);
+                        if (info.enableCond.type == EnableCondition.CondType.Static && !info.enableCond.staticValue)
+                            continue;
+                        info.objDir = (string)spine.Attribute("objDir") ?? "";
+
+                        if (!_replaceSpine.TryGetValue(spineName, out var list))
+                            _replaceSpine[spineName] = list = new List<SpineReplaceInfo>();
+                        list.Add(info);
+                        string objDirLogR = string.IsNullOrEmpty(info.objDir) ? "" : $" objDir={info.objDir}";
+                        if (logScan) MyUtils.MyLog($"配置[HookSpine][随机] {spineName}[{list.Count-1}] -> torand={absTorand} ({entries.Count} entries){objDirLogR}");
+                        continue;
+                    }
 
                     // tofolder 模式：扫描文件夹下所有 .json/.skel，自动配对同名的 .atlas
                     if (!string.IsNullOrEmpty(tofolder))
@@ -633,8 +712,76 @@ namespace UabHooker
                 {
                     string spineName = (string)spine.Attribute("name") ?? "";
                     string tofolder = (string)spine.Attribute("tofolder") ?? "";
+                    string torand = (string)spine.Attribute("torand") ?? "";
                     string avatarType = (string)spine.Attribute("type") ?? "";
                     string enableRaw = (string)spine.Attribute("enable") ?? "true";
+
+                    // torand 模式：扫描文件夹，以骨骼文件为主配对 atlas + cover，运行时随机选一组
+                    if (!string.IsNullOrEmpty(torand))
+                    {
+                        string absTorand = Path.Combine(baseDir, torand);
+                        if (!Directory.Exists(absTorand)) continue;
+
+                        var skelFiles = Directory.GetFiles(absTorand, "*", SearchOption.AllDirectories)
+                            .Where(f => IsSpineSkelFile(f));
+
+                        var entries = new List<SpineRandomEntry>();
+                        foreach (var skelFilePath in skelFiles)
+                        {
+                            string nameNoExt = Path.GetFileNameWithoutExtension(skelFilePath);
+                            string skelDir = Path.GetDirectoryName(skelFilePath);
+                            string atlasPath = Path.Combine(skelDir, nameNoExt + ".atlas");
+                            if (!File.Exists(atlasPath)) continue;
+
+                            var entry = new SpineRandomEntry
+                            {
+                                skelPath = skelFilePath,
+                                atlasPath = atlasPath
+                            };
+
+                            // cloth 类型：尝试查找 _cover 文件
+                            if (avatarType == "cloth")
+                            {
+                                string coverSkelPath = Path.Combine(skelDir, nameNoExt + "_cover" + Path.GetExtension(skelFilePath));
+                                string coverAtlasPath = Path.Combine(skelDir, nameNoExt + "_cover.atlas");
+
+                                if (File.Exists(coverSkelPath) && File.Exists(coverAtlasPath))
+                                {
+                                    entry.coverSkelPath = coverSkelPath;
+                                    entry.coverAtlasPath = coverAtlasPath;
+                                    if (logScan) MyUtils.MyLog($"[HookAvatar][随机] 找到 cover 文件: {coverSkelPath}");
+                                }
+                                else
+                                {
+                                    string coverKeepFile = Path.Combine(skelDir, nameNoExt + "_coverkeep.txt");
+                                    if (File.Exists(coverKeepFile))
+                                    {
+                                        entry.coverKeep = true;
+                                        if (logScan) MyUtils.MyLog($"[HookAvatar][随机] 找到 coverkeep 标记: {coverKeepFile}");
+                                    }
+                                }
+                            }
+
+                            entries.Add(entry);
+                            if (logScan) MyUtils.MyLog($"[HookAvatar][随机] 发现资源: skel={skelFilePath}, atlas={atlasPath}");
+                        }
+
+                        if (entries.Count == 0) continue;
+
+                        var info = new SpineReplaceInfo();
+                        info.toRandSpineEntries = entries;
+                        info.enableCond = ParseEnableCondition(enableRaw, modIdStr);
+                        if (info.enableCond.type == EnableCondition.CondType.Static && !info.enableCond.staticValue)
+                            continue;
+                        info.objDir = (string)spine.Attribute("objDir") ?? "";
+
+                        if (!_replaceAvatar.TryGetValue(spineName, out var list))
+                            _replaceAvatar[spineName] = list = new List<SpineReplaceInfo>();
+                        list.Add(info);
+                        string objDirLogR = string.IsNullOrEmpty(info.objDir) ? "" : $" objDir={info.objDir}";
+                        if (logScan) MyUtils.MyLog($"配置[HookAvatar][随机] {spineName}[{list.Count-1}] -> torand={absTorand} ({entries.Count} entries){objDirLogR}");
+                        continue;
+                    }
 
                     // tofolder 模式
                     if (!string.IsNullOrEmpty(tofolder))
@@ -1027,13 +1174,18 @@ namespace UabHooker
                     continue;
                 }
 
+                // 随机选取一组资源（优先随机池，否则使用原始字段）
+                var entry = GetRandomSpineEntry(info);
+                string useAtlas = entry?.atlasPath ?? info.atlasPath;
+                string useSkel = entry?.skelPath ?? info.skelPath;
+
                 // cacheKey 包含文件路径，保证不同配置（同 name 不同文件）不命中旧缓存
-                string cacheKey = kv.Key + "|" + info.atlasPath + "|" + info.skelPath;
+                string cacheKey = kv.Key + "|" + useAtlas + "|" + useSkel;
 
                 if (!_spineCache.TryGetValue(cacheKey, out var cached) || cached == null || cached.SkeletonAsset == null)
                 {
                     if (logEntrySpine) MyUtils.MyLog("[HookSpine] 缓存未命中，加载资源: " + cacheKey);
-                    var newAsset = LoadAndCacheSpineAsset(cacheKey, info.atlasPath, info.skelPath, __instance.material);
+                    var newAsset = LoadAndCacheSpineAsset(cacheKey, useAtlas, useSkel, __instance.material);
                     if (newAsset == null) continue;
                     cached = _spineCache[cacheKey];
                 }
@@ -1042,7 +1194,7 @@ namespace UabHooker
                 __instance.Skeleton = null;
                 Traverse.Create(__instance).Field("state").SetValue(null);
                 overwrite = true;
-                if (logReplace) MyUtils.MyLog("[HookSpine] 替换: [" + kv.Key + "] skeletonDataAsset -> " + cached.SkeletonAsset.name);
+                if (logReplace) MyUtils.MyLog("[HookSpine] 替换: [" + kv.Key + "] skeletonDataAsset -> " + cached.SkeletonAsset.name + " (随机: " + (entry != null) + ")");
                 break;
             }
         }
@@ -1077,8 +1229,13 @@ namespace UabHooker
                 if (sdaName.IndexOf(kv.Key, StringComparison.OrdinalIgnoreCase) < 0)
                     continue;
 
+                // 随机选取一组资源（优先随机池，否则使用原始字段）
+                var entry = GetRandomSpineEntry(info);
+                string useAtlas = entry?.atlasPath ?? info.atlasPath;
+                string useSkel = entry?.skelPath ?? info.skelPath;
+
                 // cacheKey 包含文件路径，保证不同配置不命中旧缓存
-                string cacheKey = kv.Key + "|" + info.atlasPath + "|" + info.skelPath;
+                string cacheKey = kv.Key + "|" + useAtlas + "|" + useSkel;
 
                 if (!_spineCache.TryGetValue(cacheKey, out var cached) || cached == null || cached.SkeletonAsset == null)
                 {
@@ -1087,13 +1244,13 @@ namespace UabHooker
                     // 从原始 asset 提取材质用于创建新 atlas
                     Material templateMat = GetMaterialFromSda(skeletonDataAsset);
 
-                    var newAsset = LoadAndCacheSpineAsset(cacheKey, info.atlasPath, info.skelPath, templateMat);
+                    var newAsset = LoadAndCacheSpineAsset(cacheKey, useAtlas, useSkel, templateMat);
                     if (newAsset == null) continue;
                     cached = _spineCache[cacheKey];
                 }
 
                 skeletonDataAsset = cached.SkeletonAsset;
-                if (logReplace) MyUtils.MyLog("[HookAvatar] SetupSkeletonGraphic 替换: [" + kv.Key + "] skeletonDataAsset -> " + cached.SkeletonAsset.name);
+                if (logReplace) MyUtils.MyLog("[HookAvatar] SetupSkeletonGraphic 替换: [" + kv.Key + "] skeletonDataAsset -> " + cached.SkeletonAsset.name + " (随机: " + (entry != null) + ")");
                 break;
             }
         }
@@ -1123,11 +1280,15 @@ namespace UabHooker
                             continue;
 
                         var info = kv.Value;
+                        var entry = GetRandomSpineEntry(info);
+                        string useCoverAtlas = entry?.coverAtlasPath ?? info.coverAtlasPath;
+                        string useCoverSkel = entry?.coverSkelPath ?? info.coverSkelPath;
+                        bool useCoverKeep = entry?.coverKeep ?? info.coverKeep;
                         string cacheKey = kv.Key + "_cover";
 
-                        if (!string.IsNullOrEmpty(info.coverAtlasPath) && !string.IsNullOrEmpty(info.coverSkelPath))
+                        if (!string.IsNullOrEmpty(useCoverAtlas) && !string.IsNullOrEmpty(useCoverSkel))
                         {
-                            var newAsset = LoadAndCacheSpineAsset(cacheKey, info.coverAtlasPath, info.coverSkelPath, cover.material);
+                            var newAsset = LoadAndCacheSpineAsset(cacheKey, useCoverAtlas, useCoverSkel, cover.material);
                             if (newAsset != null)
                             {
                                 cover.skeletonDataAsset = newAsset;
@@ -1136,12 +1297,12 @@ namespace UabHooker
                                 cover.Initialize(true);
                                 cover.gameObject.SetActive(true);
                                 if (logReplace)
-                                    MyUtils.MyLog("[HookAvatar] 替换 clothingCover: " + coverName + " -> " + cacheKey);
+                                    MyUtils.MyLog("[HookAvatar] 替换 clothingCover: " + coverName + " -> " + cacheKey + " (随机: " + (entry != null) + ")");
                             }
                         }
                         else
                         {
-                            if (!info.coverKeep)
+                            if (!useCoverKeep)
                             {
                                 if (cover.gameObject.activeSelf)
                                 {
@@ -1242,10 +1403,11 @@ namespace UabHooker
 					if (mainTexture.name.StartsWith("uabhook_"))
 					{ if (logEntrySpineImg) MyUtils.MyLog("[HookSpineImg] 已替换跳过: " + mainTexture.name); continue; }
 
-					Texture2D newTex = GetOrLoadTexture(spineInfo.filePath);
+					string actualPath = GetRandomFilePath(spineInfo);
+					Texture2D newTex = GetOrLoadTexture(actualPath);
 					if (newTex == null) continue;
 					__instance.OverrideTexture = newTex;
-					if (logReplace) MyUtils.MyLog("[HookSpineImg] 替换: [" + skelKv.Key + "] " + mainTexture.name + " -> " + __instance.OverrideTexture.name);
+					if (logReplace) MyUtils.MyLog("[HookSpineImg] 替换: [" + skelKv.Key + "] " + mainTexture.name + " -> " + actualPath);
 
 					// 替换 atlasAssets 中所有材质的纹理（子mesh的材质来源）
 					// 关键材质如 "avatar_6_hair1_17_Material" (shader: Spine/Skeleton)
@@ -1477,6 +1639,20 @@ namespace UabHooker
                 return info.toRandFiles[idx];
             }
             return info.filePath;
+        }
+
+        /// <summary>
+        /// 从 SpineReplaceInfo 的随机池中选取一组资源。
+        /// 没有随机池时返回 null，调用方使用原始字段。
+        /// </summary>
+        private static SpineRandomEntry GetRandomSpineEntry(SpineReplaceInfo info)
+        {
+            if (info.toRandSpineEntries.Count > 0)
+            {
+                int idx = UnityEngine.Random.Range(0, info.toRandSpineEntries.Count);
+                return info.toRandSpineEntries[idx];
+            }
+            return null;
         }
 
         private static Texture2D GetOrLoadTexture(string path)
