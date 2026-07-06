@@ -86,6 +86,10 @@ namespace UabHooker
             public EnableCondition enableCond = new EnableCondition();
             public int w = 0; // 0 表示不指定，使用原始尺寸
             public int h = 0;
+
+            // ← 随机替换支持
+            public string toRandFolder = "";                  // 随机文件夹路径
+            public List<string> toRandFiles = new List<string>(); // 预扫描的文件列表
         }
 
         // ← 精灵替换信息（含可选的 w/h 尺寸、坐标）
@@ -298,20 +302,35 @@ namespace UabHooker
                 {
                     string bundleName = (string)uab.Attribute("name") ?? "";
                     string to = ResolveToPath((string)uab.Attribute("to") ?? "", baseDir);
+                    string torandRaw = (string)uab.Attribute("torand") ?? "";
                     string uabEnableRaw = (string)uab.Attribute("enable") ?? "true";
                     if (string.IsNullOrEmpty(bundleName)) continue;
 
-                    var uabInfo = new FileReplaceInfo { filePath = to };
-                    uabInfo.enableCond = ParseEnableCondition(uabEnableRaw, modIdStr);
-                    if (uabInfo.enableCond.type == EnableCondition.CondType.Static && !uabInfo.enableCond.staticValue)
-                        continue;
-
-                    if (!string.IsNullOrEmpty(to))
+                    // 整包替换（to 或 torand）
+                    if (!string.IsNullOrEmpty(to) || !string.IsNullOrEmpty(torandRaw))
                     {
+                        string absTorand = string.IsNullOrEmpty(torandRaw) ? "" : Path.Combine(baseDir, torandRaw);
+                        var uabInfo = new FileReplaceInfo { filePath = to };
+                        if (!string.IsNullOrEmpty(absTorand) && Directory.Exists(absTorand))
+                        {
+                            uabInfo.toRandFolder = absTorand;
+                            uabInfo.toRandFiles = Directory.GetFiles(absTorand, "*", SearchOption.AllDirectories)
+                                .Where(f => IsImageFile(f)).ToList();
+                        }
+                        uabInfo.enableCond = ParseEnableCondition(uabEnableRaw, modIdStr);
+                        if (uabInfo.enableCond.type == EnableCondition.CondType.Static && !uabInfo.enableCond.staticValue)
+                            continue;
                         if (!_replaceUab.TryGetValue(bundleName, out var list))
                             _replaceUab[bundleName] = list = new List<FileReplaceInfo>();
                         list.Add(uabInfo);
-						if (logScan) MyUtils.MyLog($"配置[HookImg->整包] {bundleName}[{list.Count-1}] -> {to}");
+                        if (uabInfo.toRandFiles.Count > 0)
+                        {
+                            if (logScan) MyUtils.MyLog($"配置[HookImg->整包][随机] {bundleName}[{list.Count-1}] -> torand={absTorand} ({uabInfo.toRandFiles.Count} files)");
+                        }
+                        else
+                        {
+                            if (logScan) MyUtils.MyLog($"配置[HookImg->整包] {bundleName}[{list.Count-1}] -> {to}");
+                        }
                         continue;
                     }
 
@@ -322,6 +341,7 @@ namespace UabHooker
                     {
                         string assetPath = (string)img.Attribute("assetPath") ?? "";
                         string tofolder = (string)img.Attribute("tofolder") ?? "";
+                        string torand = (string)img.Attribute("torand") ?? "";
                         string imgEnableRaw = (string)img.Attribute("enable") ?? "true";
 
                         // tofolder 模式：自动扫描文件夹下的所有图片
@@ -355,6 +375,34 @@ namespace UabHooker
                                 string sizeInfo = fi.w > 0 && fi.h > 0 ? $" w={fi.w} h={fi.h}" : "";
                                 if (logScan) MyUtils.MyLog($"配置[HookImg][自动扫描] [{bundleName}] {fullAssetPath} -> {filePath}{sizeInfo}");
                             }
+                            continue;
+                        }
+
+                        // torand 模式：随机从文件夹取文件
+                        if (!string.IsNullOrEmpty(torand))
+                        {
+                            string absTorand = Path.Combine(baseDir, torand);
+                            if (!Directory.Exists(absTorand)) continue;
+                            var enableCond = ParseEnableCondition(imgEnableRaw, modIdStr);
+                            if (enableCond.type == EnableCondition.CondType.Static && !enableCond.staticValue)
+                                continue;
+
+                            var imageFiles = Directory.GetFiles(absTorand, "*", SearchOption.AllDirectories)
+                                .Where(f => IsImageFile(f)).ToList();
+                            if (imageFiles.Count == 0) continue;
+
+                            var fi = new FileReplaceInfo { toRandFolder = absTorand, toRandFiles = imageFiles };
+                            fi.enableCond = enableCond;
+                            int wVal, hVal;
+                            if (img.Attribute("w") != null && int.TryParse((string)img.Attribute("w"), out wVal))
+                                fi.w = wVal;
+                            if (img.Attribute("h") != null && int.TryParse((string)img.Attribute("h"), out hVal))
+                                fi.h = hVal;
+
+                            if (!map.TryGetValue(assetPath, out var innerList))
+                                map[assetPath] = innerList = new List<FileReplaceInfo>();
+                            innerList.Add(fi);
+                            if (logScan) MyUtils.MyLog($"配置[HookImg][随机] [{bundleName}] {assetPath}[{innerList.Count-1}] -> torand={absTorand} ({imageFiles.Count} files)");
                             continue;
                         }
 
@@ -459,10 +507,24 @@ namespace UabHooker
                     {
                         string spriteName = (string)sprite.Attribute("name") ?? "";
                         string to = ResolveToPath((string)sprite.Attribute("to") ?? "", baseDir);
+                        string torand = (string)sprite.Attribute("torand") ?? "";
                         string enableRaw = (string)sprite.Attribute("enable") ?? "true";
-                        if (string.IsNullOrEmpty(spriteName) || string.IsNullOrEmpty(to)) continue;
+                        if (string.IsNullOrEmpty(spriteName) || (string.IsNullOrEmpty(to) && string.IsNullOrEmpty(torand))) continue;
 
                         var info = new SpriteReplaceInfo { filePath = to };
+
+                        // torand 模式
+                        if (!string.IsNullOrEmpty(torand))
+                        {
+                            string absTorand = Path.Combine(baseDir, torand);
+                            if (!Directory.Exists(absTorand)) continue;
+                            var imageFiles = Directory.GetFiles(absTorand, "*", SearchOption.AllDirectories)
+                                .Where(f => IsImageFile(f)).ToList();
+                            if (imageFiles.Count == 0) continue;
+                            info.toRandFolder = absTorand;
+                            info.toRandFiles = imageFiles;
+                        }
+
                         info.enableCond = ParseEnableCondition(enableRaw, modIdStr);
                         // 静态 false 直接跳过
                         if (info.enableCond.type == EnableCondition.CondType.Static && !info.enableCond.staticValue)
@@ -489,7 +551,14 @@ namespace UabHooker
                         string extInfo = "";
                         if (info.w > 0 && info.h > 0) extInfo += $" w={info.w} h={info.h}";
                         if (info.hasPos) extInfo += $" pos({info.posX},{info.posY})";
-						if (logScan) MyUtils.MyLog($"配置[HookAtlas] [{atlasName}] {spriteName} -> {to}{extInfo}");
+                        if (info.toRandFiles.Count > 0)
+                        {
+                            if (logScan) MyUtils.MyLog($"配置[HookAtlas][随机] [{atlasName}] {spriteName}[{list.Count-1}] -> torand={info.toRandFolder} ({info.toRandFiles.Count} files){extInfo}");
+                        }
+                        else
+                        {
+                            if (logScan) MyUtils.MyLog($"配置[HookAtlas] [{atlasName}] {spriteName} -> {to}{extInfo}");
+                        }
                     }
                 }
             }
@@ -817,11 +886,11 @@ namespace UabHooker
             if (string.IsNullOrEmpty(path) || _activeUab.Count == 0) return;
 
             if (_activeUab.TryGetValue(path, out var info))
-            { if (logReplace) MyUtils.MyLog("[HookUab] 替换: " + path + " -> " + info.filePath); path = info.filePath; return; }
+            { string actual = GetRandomFilePath(info); if (logReplace) MyUtils.MyLog("[HookUab] 替换: " + path + " -> " + actual); path = actual; return; }
 
             string fn = Path.GetFileName(path);
             if (!string.IsNullOrEmpty(fn) && _activeUab.TryGetValue(fn, out info))
-            { if (logReplace) MyUtils.MyLog("[HookUab] 替换: " + path + " -> " + info.filePath); path = info.filePath; }
+            { string actual = GetRandomFilePath(info); if (logReplace) MyUtils.MyLog("[HookUab] 替换: " + path + " -> " + actual); path = actual; }
         }
 
         // ═══════════════════════════════════════════════════════════════
@@ -853,10 +922,11 @@ namespace UabHooker
                 {
                     if (bundleKv.Value.TryGetValue(assetPath, out var imgInfo))
                     {
-                        if (logEntryImg) MyUtils.MyLog("[HookImg] 匹配到: bundle=" + bundleKv.Key + " filePath=" + imgInfo.filePath + " exists=" + File.Exists(imgInfo.filePath));
-                        var r = LoadRep(imgInfo.filePath, type, imgInfo.w, imgInfo.h);
-                        if (r != null) { if (logReplace) MyUtils.MyLog("[HookImg] 替换: " + assetPath + " -> " + imgInfo.filePath); __result = new ValueTuple<FrameWork.AssetBundlePackage.ResourcePackage, string, UnityEngine.Object>(null, null, r); return false; }
-                        else if (logEntryImg) MyUtils.MyLog("[HookImg] LoadRep失败: " + imgInfo.filePath);
+                        string actualPath = GetRandomFilePath(imgInfo);
+                        if (logEntryImg) MyUtils.MyLog("[HookImg] 匹配到: bundle=" + bundleKv.Key + " filePath=" + actualPath + " exists=" + File.Exists(actualPath));
+                        var r = LoadRep(actualPath, type, imgInfo.w, imgInfo.h);
+                        if (r != null) { if (logReplace) MyUtils.MyLog("[HookImg] 替换: " + assetPath + " -> " + actualPath); __result = new ValueTuple<FrameWork.AssetBundlePackage.ResourcePackage, string, UnityEngine.Object>(null, null, r); return false; }
+                        else if (logEntryImg) MyUtils.MyLog("[HookImg] LoadRep失败: " + actualPath);
                     }
                 }
                 // 也匹配短名
@@ -867,9 +937,10 @@ namespace UabHooker
                     {
                         if (bundleKv.Value.TryGetValue(shortName, out var imgInfo))
                         {
-                            if (logEntryImg) MyUtils.MyLog("[HookImg] 匹配到短名: bundle=" + bundleKv.Key + " filePath=" + imgInfo.filePath + " exists=" + File.Exists(imgInfo.filePath));
-                            var r = LoadRep(imgInfo.filePath, type, imgInfo.w, imgInfo.h);
-                            if (r != null) { if (logReplace) MyUtils.MyLog("[HookImg] 替换(短名): " + shortName + " -> " + imgInfo.filePath); __result = new ValueTuple<FrameWork.AssetBundlePackage.ResourcePackage, string, UnityEngine.Object>(null, null, r); return false; }
+                            string actualPath = GetRandomFilePath(imgInfo);
+                            if (logEntryImg) MyUtils.MyLog("[HookImg] 匹配到短名: bundle=" + bundleKv.Key + " filePath=" + actualPath + " exists=" + File.Exists(actualPath));
+                            var r = LoadRep(actualPath, type, imgInfo.w, imgInfo.h);
+                            if (r != null) { if (logReplace) MyUtils.MyLog("[HookImg] 替换(短名): " + shortName + " -> " + actualPath); __result = new ValueTuple<FrameWork.AssetBundlePackage.ResourcePackage, string, UnityEngine.Object>(null, null, r); return false; }
                         }
                     }
                 }
@@ -1222,13 +1293,14 @@ namespace UabHooker
             {
                 foreach (var info in list)
                 {
-                    Texture2D tex = GetOrLoadTexture(info.filePath);
-                    if (tex == null) { if (logReplace) MyUtils.MyLog("[HookAtlas] 加载失败: " + info.filePath); continue; }
+                    string actualPath = GetRandomFilePath(info);
+                    Texture2D tex = GetOrLoadTexture(actualPath);
+                    if (tex == null) { if (logReplace) MyUtils.MyLog("[HookAtlas] 加载失败: " + actualPath); continue; }
 
                     var sprite = Sprite.Create(tex, new Rect(0, 0, tex.width, tex.height), new Vector2(0.5f, 0.5f));
                     sprite.name = name;
                     __result = sprite;
-                    if (logReplace) MyUtils.MyLog("[HookAtlas] 替换: [" + atlasName + "] " + name + " -> " + info.filePath);
+                    if (logReplace) MyUtils.MyLog("[HookAtlas] 替换: [" + atlasName + "] " + name + " -> " + actualPath);
                     return false;
                 }
             }
@@ -1253,10 +1325,11 @@ namespace UabHooker
                 if (!atlasKv.Value.TryGetValue(spriteName, out var list)) continue;
                 foreach (var info in list)
                 {
-                    Texture2D tex = GetOrLoadTexture(info.filePath);
+                    string actualPath = GetRandomFilePath(info);
+                    Texture2D tex = GetOrLoadTexture(actualPath);
                     if (tex == null)
                     {
-                        if (logReplace) MyUtils.MyLog("[HookAtlas] SetImageSpriteOnly 加载失败: " + info.filePath);
+                        if (logReplace) MyUtils.MyLog("[HookAtlas] SetImageSpriteOnly 加载失败: " + actualPath);
                         continue;
                     }
                     var sprite = Sprite.Create(tex, new Rect(0, 0, tex.width, tex.height), new Vector2(0.5f, 0.5f));
@@ -1390,6 +1463,20 @@ namespace UabHooker
             };
             if (logEntrySpine) MyUtils.MyLog("[HookSpine] 加载完成并缓存: " + cacheKey);
             return skeletonAsset;
+        }
+
+        /// <summary>
+        /// 从 FileReplaceInfo 中获取实际替换文件路径。
+        /// 有 toRandFiles 时随机选取，否则返回 filePath。
+        /// </summary>
+        private static string GetRandomFilePath(FileReplaceInfo info)
+        {
+            if (info.toRandFiles.Count > 0)
+            {
+                int idx = UnityEngine.Random.Range(0, info.toRandFiles.Count);
+                return info.toRandFiles[idx];
+            }
+            return info.filePath;
         }
 
         private static Texture2D GetOrLoadTexture(string path)
