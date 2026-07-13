@@ -37,13 +37,13 @@ namespace UabHooker
         // ← 源数据：Spine 完整资源替换（hookSpine，atlas + skel，简单 SkeletonGraphic）
         // List 用于支持同一 name 多个条件条目（如不同 dropdown 索引的不同 spine 配置）
         private static Dictionary<string, List<SpineReplaceInfo>> _replaceSpine = new Dictionary<string, List<SpineReplaceInfo>>();
-        // ← 运行时快照（hookSpine）
-        private static Dictionary<string, SpineReplaceInfo> _activeSpine = new Dictionary<string, SpineReplaceInfo>();
+        // ← 运行时快照（hookSpine，List 支持同 name 不同 objDir 多路匹配）
+        private static Dictionary<string, List<SpineReplaceInfo>> _activeSpine = new Dictionary<string, List<SpineReplaceInfo>>();
         // ← 源数据：AvatarSpine 完整资源替换（hookAvatar，含 cover/coverKeep）
         // List 用于支持同一 name 多个条件条目
         private static Dictionary<string, List<SpineReplaceInfo>> _replaceAvatar = new Dictionary<string, List<SpineReplaceInfo>>();
-        // ← 运行时快照（hookAvatar）
-        private static Dictionary<string, SpineReplaceInfo> _activeAvatar = new Dictionary<string, SpineReplaceInfo>();
+        // ← 运行时快照（hookAvatar，List 支持同 name 不同 objDir 多路匹配）
+        private static Dictionary<string, List<SpineReplaceInfo>> _activeAvatar = new Dictionary<string, List<SpineReplaceInfo>>();
         // ← Spine 运行时缓存（避免反复创建 SkeletonDataAsset）
         private static Dictionary<string, SpineCachedAssets> _spineCache = new Dictionary<string, SpineCachedAssets>();
 
@@ -681,7 +681,8 @@ namespace UabHooker
                             if (!_replaceSpine.TryGetValue(nameNoExt, out var list))
                                 _replaceSpine[nameNoExt] = list = new List<SpineReplaceInfo>();
                             list.Add(info);
-                            if (logScan) MyUtils.MyLog($"配置[HookSpine][自动扫描] {nameNoExt}[{list.Count-1}] -> atlas={atlasPath}, skel={skelFilePath}");
+							string objDirLogA = string.IsNullOrEmpty(info.objDir) ? "" : $" objDir={info.objDir}";
+							if (logScan) MyUtils.MyLog($"配置[HookSpine][自动扫描] {nameNoExt}[{list.Count-1}] -> atlas={atlasPath}, skel={skelFilePath} {objDirLogA}");
                         }
                         continue;
                     }
@@ -981,25 +982,29 @@ namespace UabHooker
                     _activeSpineImg[skelKv.Key] = inner;
             }
 
-            // _replaceSpine（list 结构，同 name 多条，取第一个 enable 的）
+            // _replaceSpine（保留所有 enable 的条目，用于 objDir 多路匹配）
             _activeSpine.Clear();
             foreach (var kv in _replaceSpine)
+            {
+                var enabledList = new List<SpineReplaceInfo>();
                 foreach (var info in kv.Value)
                     if (info.enableCond.IsEnabled())
-                    {
-                        _activeSpine[kv.Key] = info;
-                        break;
-                    }
+                        enabledList.Add(info);
+                if (enabledList.Count > 0)
+                    _activeSpine[kv.Key] = enabledList;
+            }
 
-            // _replaceAvatar（list 结构，同 name 多条，取第一个 enable 的）
+            // _replaceAvatar（保留所有 enable 的条目，用于 objDir 多路匹配）
             _activeAvatar.Clear();
             foreach (var kv in _replaceAvatar)
+            {
+                var enabledList = new List<SpineReplaceInfo>();
                 foreach (var info in kv.Value)
                     if (info.enableCond.IsEnabled())
-                    {
-                        _activeAvatar[kv.Key] = info;
-                        break;
-                    }
+                        enabledList.Add(info);
+                if (enabledList.Count > 0)
+                    _activeAvatar[kv.Key] = enabledList;
+            }
 
             // _sourceAtlas → _activeAtlas
             _activeAtlas.Clear();
@@ -1161,41 +1166,42 @@ namespace UabHooker
 
             foreach (var kv in _activeSpine)
             {
-                var info = kv.Value;
-
                 // 用 sda.name 匹配
                 if (sdaName.IndexOf(kv.Key, StringComparison.OrdinalIgnoreCase) < 0)
                     continue;
 
-                // objDir 过滤：检查对象名/路径后缀（支持 "NpcSpine" 或 "Body/NpcSpine" 等）
-                if (!MatchesObjDir(__instance, info.objDir))
+                foreach (var info in kv.Value)
                 {
-                    if (logEntrySpine) MyUtils.MyLog($"[HookSpine] objDir不匹配: need={info.objDir} 跳过 [{kv.Key}]");
-                    continue;
+                    // objDir 过滤：检查对象名/路径后缀（支持 "NpcSpine" 或 "Body/NpcSpine" 等）
+                    if (!MatchesObjDir(__instance, info.objDir))
+                    {
+                        if (logEntrySpine) MyUtils.MyLog($"[HookSpine] objDir不匹配: need={info.objDir} 跳过 [{kv.Key}]");
+                        continue;
+                    }
+
+                    // 随机选取一组资源（优先随机池，否则使用原始字段）
+                    var entry = GetRandomSpineEntry(info);
+                    string useAtlas = entry?.atlasPath ?? info.atlasPath;
+                    string useSkel = entry?.skelPath ?? info.skelPath;
+
+                    // cacheKey 包含文件路径，保证不同配置（同 name 不同文件）不命中旧缓存
+                    string cacheKey = kv.Key + "|" + useAtlas + "|" + useSkel;
+
+                    if (!_spineCache.TryGetValue(cacheKey, out var cached) || cached == null || cached.SkeletonAsset == null)
+                    {
+                        if (logEntrySpine) MyUtils.MyLog("[HookSpine] 缓存未命中，加载资源: " + cacheKey);
+                        var newAsset = LoadAndCacheSpineAsset(cacheKey, useAtlas, useSkel, __instance.material);
+                        if (newAsset == null) continue;
+                        cached = _spineCache[cacheKey];
+                    }
+
+                    __instance.skeletonDataAsset = cached.SkeletonAsset;
+                    __instance.Skeleton = null;
+                    Traverse.Create(__instance).Field("state").SetValue(null);
+                    overwrite = true;
+                    if (logReplace) MyUtils.MyLog("[HookSpine] 替换: [" + kv.Key + "] skeletonDataAsset -> " + cached.SkeletonAsset.name + " (随机: " + (entry != null) + ")");
+                    return;
                 }
-
-                // 随机选取一组资源（优先随机池，否则使用原始字段）
-                var entry = GetRandomSpineEntry(info);
-                string useAtlas = entry?.atlasPath ?? info.atlasPath;
-                string useSkel = entry?.skelPath ?? info.skelPath;
-
-                // cacheKey 包含文件路径，保证不同配置（同 name 不同文件）不命中旧缓存
-                string cacheKey = kv.Key + "|" + useAtlas + "|" + useSkel;
-
-                if (!_spineCache.TryGetValue(cacheKey, out var cached) || cached == null || cached.SkeletonAsset == null)
-                {
-                    if (logEntrySpine) MyUtils.MyLog("[HookSpine] 缓存未命中，加载资源: " + cacheKey);
-                    var newAsset = LoadAndCacheSpineAsset(cacheKey, useAtlas, useSkel, __instance.material);
-                    if (newAsset == null) continue;
-                    cached = _spineCache[cacheKey];
-                }
-
-                __instance.skeletonDataAsset = cached.SkeletonAsset;
-                __instance.Skeleton = null;
-                Traverse.Create(__instance).Field("state").SetValue(null);
-                overwrite = true;
-                if (logReplace) MyUtils.MyLog("[HookSpine] 替换: [" + kv.Key + "] skeletonDataAsset -> " + cached.SkeletonAsset.name + " (随机: " + (entry != null) + ")");
-                break;
             }
         }
 
@@ -1216,42 +1222,43 @@ namespace UabHooker
 
             foreach (var kv in _activeAvatar)
             {
-                var info = kv.Value;
-
-                // objDir 过滤：检查对象名/路径后缀
-                if (!MatchesObjDir(target, info.objDir))
-                {
-                    if (logEntryAvatar) MyUtils.MyLog($"[HookAvatar] objDir不匹配: need={info.objDir} 跳过 [{kv.Key}]");
-                    continue;
-                }
-
                 // 用 sda.name 匹配
                 if (sdaName.IndexOf(kv.Key, StringComparison.OrdinalIgnoreCase) < 0)
                     continue;
 
-                // 随机选取一组资源（优先随机池，否则使用原始字段）
-                var entry = GetRandomSpineEntry(info);
-                string useAtlas = entry?.atlasPath ?? info.atlasPath;
-                string useSkel = entry?.skelPath ?? info.skelPath;
-
-                // cacheKey 包含文件路径，保证不同配置不命中旧缓存
-                string cacheKey = kv.Key + "|" + useAtlas + "|" + useSkel;
-
-                if (!_spineCache.TryGetValue(cacheKey, out var cached) || cached == null || cached.SkeletonAsset == null)
+                foreach (var info in kv.Value)
                 {
-                    if (logEntryAvatar) MyUtils.MyLog("[HookAvatar] 缓存未命中，加载资源: " + cacheKey);
+                    // objDir 过滤：检查对象名/路径后缀
+                    if (!MatchesObjDir(target, info.objDir))
+                    {
+                        if (logEntryAvatar) MyUtils.MyLog($"[HookAvatar] objDir不匹配: need={info.objDir} 跳过 [{kv.Key}]");
+                        continue;
+                    }
 
-                    // 从原始 asset 提取材质用于创建新 atlas
-                    Material templateMat = GetMaterialFromSda(skeletonDataAsset);
+                    // 随机选取一组资源（优先随机池，否则使用原始字段）
+                    var entry = GetRandomSpineEntry(info);
+                    string useAtlas = entry?.atlasPath ?? info.atlasPath;
+                    string useSkel = entry?.skelPath ?? info.skelPath;
 
-                    var newAsset = LoadAndCacheSpineAsset(cacheKey, useAtlas, useSkel, templateMat);
-                    if (newAsset == null) continue;
-                    cached = _spineCache[cacheKey];
+                    // cacheKey 包含文件路径，保证不同配置不命中旧缓存
+                    string cacheKey = kv.Key + "|" + useAtlas + "|" + useSkel;
+
+                    if (!_spineCache.TryGetValue(cacheKey, out var cached) || cached == null || cached.SkeletonAsset == null)
+                    {
+                        if (logEntryAvatar) MyUtils.MyLog("[HookAvatar] 缓存未命中，加载资源: " + cacheKey);
+
+                        // 从原始 asset 提取材质用于创建新 atlas
+                        Material templateMat = GetMaterialFromSda(skeletonDataAsset);
+
+                        var newAsset = LoadAndCacheSpineAsset(cacheKey, useAtlas, useSkel, templateMat);
+                        if (newAsset == null) continue;
+                        cached = _spineCache[cacheKey];
+                    }
+
+                    skeletonDataAsset = cached.SkeletonAsset;
+                    if (logReplace) MyUtils.MyLog("[HookAvatar] SetupSkeletonGraphic 替换: [" + kv.Key + "] skeletonDataAsset -> " + cached.SkeletonAsset.name + " (随机: " + (entry != null) + ")");
+                    return;
                 }
-
-                skeletonDataAsset = cached.SkeletonAsset;
-                if (logReplace) MyUtils.MyLog("[HookAvatar] SetupSkeletonGraphic 替换: [" + kv.Key + "] skeletonDataAsset -> " + cached.SkeletonAsset.name + " (随机: " + (entry != null) + ")");
-                break;
             }
         }
 
@@ -1279,7 +1286,9 @@ namespace UabHooker
                         if (!coverName.Contains(kv.Key) && !coverName.StartsWith(kv.Key))
                             continue;
 
-                        var info = kv.Value;
+                        // cover 处理取第一个 enable 条目（objDir 不适用于 cover 场景）
+                        var info = kv.Value.Count > 0 ? kv.Value[0] : null;
+                        if (info == null) continue;
                         var entry = GetRandomSpineEntry(info);
                         string useCoverAtlas = entry?.coverAtlasPath ?? info.coverAtlasPath;
                         string useCoverSkel = entry?.coverSkelPath ?? info.coverSkelPath;
