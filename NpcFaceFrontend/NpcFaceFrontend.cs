@@ -193,9 +193,10 @@ namespace NpcFace
         private Harmony harmony;
 
 		private static bool showEntryLog = false;
+		private static bool showFindLog = false;
+		private static bool showLoadLog = false;
 
-
-        public static bool npcFace; // 开关 是否开启
+		public static bool npcFace; // 开关 是否开启
         public static bool forTaiwu; // 开关 太吾是否开启
         public static bool forNpc; // 开关 NPC是否开启
 
@@ -569,93 +570,93 @@ namespace NpcFace
         }
 
 		#region 使用id进行查找（ 不使用了）
-		/// <summary>
-		/// 根据接口信息中的id 尝试设置 普通npc  立绘
-		/// </summary>
-        public static void TrySetNpcFace(TaiwuAvatar avatar, CharacterAvatar? instance, int charId)
-        {
-            if (avatar == null) return;
-            var curId = charId;
-            if (curId != -1)
-            {
-                // MyUtils.MyLog($"charId 找到id {curId}");
-                if (idRes.ContainsKey(curId))
-                    resLoad(avatar, instance, isTaiwu: false, idRes[curId]);
-            }
-        }
-		/// <summary>
-		/// 根据接口信息 中的 id 尝试设置 普通npc  立绘
-		/// </summary>
-		public static void TrySetNpcFace(TaiwuAvatar avatar, CharacterAvatar? instance, CharacterDisplayData data)
-        {
-            if (avatar == null) return;
-            var curId = data.CharacterId;
-            if (curId != -1)
-            {
-				// MyUtils.MyLog($"CharacterDisplayData 找到id {curId}");
-				if (idRes.ContainsKey(curId))
-                    resLoad(avatar, instance, isTaiwu: false, idRes[curId]);
-            }
-        }
+		// /// <summary>
+		// /// 根据接口信息中的id 尝试设置 普通npc  立绘
+		// /// </summary>
+        // public static void TrySetNpcFace(TaiwuAvatar avatar, CharacterAvatar? instance, int charId)
+        // {
+        //     if (avatar == null) return;
+        //     var curId = charId;
+        //     if (curId != -1)
+        //     {
+        //         // MyUtils.MyLog($"charId 找到id {curId}");
+        //         if (idRes.ContainsKey(curId))
+        //             resLoad(avatar, instance, isTaiwu: false, idRes[curId]);
+        //     }
+        // }
+		// /// <summary>
+		// /// 根据接口信息 中的 id 尝试设置 普通npc  立绘
+		// /// </summary>
+		// public static void TrySetNpcFace(TaiwuAvatar avatar, CharacterAvatar? instance, CharacterDisplayData data)
+        // {
+        //     if (avatar == null) return;
+        //     var curId = data.CharacterId;
+        //     if (curId != -1)
+        //     {
+		// 		// MyUtils.MyLog($"CharacterDisplayData 找到id {curId}");
+		// 		if (idRes.ContainsKey(curId))
+        //             resLoad(avatar, instance, isTaiwu: false, idRes[curId]);
+        //     }
+        // }
 
-		/// <summary>
-		/// 尝试设置 普通npc  立绘
-		/// 接口信息中无id， 需要根据 mousetips 找id
-		/// </summary>
-		public static void TrySetNpcFace(TaiwuAvatar avatar, CharacterAvatar? instance, AvatarRelatedData relatedData)
-        {
-			// MyUtils.MyLog("TrySetNpcFace");
-            if(avatar == null) return;
-            var curId = TryFindId(avatar.transform, maxUp: 3);
-            if(curId != -1)
-            {
-                var taiwuCharId = SingletonObject.getInstance<BasicGameData>().TaiwuCharId;
-                if(curId == taiwuCharId)
-                {
-                    resLoad(avatar, instance, isTaiwu: true);
-                }
-                if (idRes.ContainsKey(curId))
-                {
-                    resLoad(avatar, instance, isTaiwu: false, idRes[curId]);
-                }
-                else
-                {
-                }
-            }
-        }
+		// /// <summary>
+		// /// 尝试设置 普通npc  立绘
+		// /// 接口信息中无id， 需要根据 mousetips 找id
+		// /// </summary>
+		// public static void TrySetNpcFace(TaiwuAvatar avatar, CharacterAvatar? instance, AvatarRelatedData relatedData)
+        // {
+		// 	// MyUtils.MyLog("TrySetNpcFace");
+        //     if(avatar == null) return;
+        //     var curId = TryFindId(avatar.transform, maxUp: 3);
+        //     if(curId != -1)
+        //     {
+        //         var taiwuCharId = SingletonObject.getInstance<BasicGameData>().TaiwuCharId;
+        //         if(curId == taiwuCharId)
+        //         {
+        //             resLoad(avatar, instance, isTaiwu: true);
+        //         }
+        //         if (idRes.ContainsKey(curId))
+        //         {
+        //             resLoad(avatar, instance, isTaiwu: false, idRes[curId]);
+        //         }
+        //         else
+        //         {
+        //         }
+        //     }
+        // }
 
-		// 尝试寻找id， maxUp 控制向上寻找的层数
-		public static int TryFindId(Transform transform, int maxUp)
-        {
-			// MyUtils.MyLog($"当前查找{transform}, {maxUp}");
-			var s = TryGetNpcId(transform);
-            if (s == -1)
-            {
-                if (transform.parent && maxUp != 0)
-                {
-                    return TryFindId(transform.parent, maxUp - 1);
-                }
-            }
-            return s;
-        }
+		// // 尝试寻找id， maxUp 控制向上寻找的层数
+		// public static int TryFindId(Transform transform, int maxUp)
+        // {
+		// 	// MyUtils.MyLog($"当前查找{transform}, {maxUp}");
+		// 	var s = TryGetNpcId(transform);
+        //     if (s == -1)
+        //     {
+        //         if (transform.parent && maxUp != 0)
+        //         {
+        //             return TryFindId(transform.parent, maxUp - 1);
+        //         }
+        //     }
+        //     return s;
+        // }
 
-		// 尝试在当前层级及子层级寻找id， 
-		public static int TryGetNpcId(Transform transform)
-        {
-			// 尝试获取 TooltipInvoker 并从 RuntimeParam 中提取 id
-			var r = transform.GetComponent<TooltipInvoker>();
-            if(r == null) r = transform.GetComponentInChildren<TooltipInvoker>();
-            int charId = -1;
-            if(r != null && r.RuntimeParam != null)
-            {
+		// // 尝试在当前层级及子层级寻找id， 
+		// public static int TryGetNpcId(Transform transform)
+        // {
+		// 	// 尝试获取 TooltipInvoker 并从 RuntimeParam 中提取 id
+		// 	var r = transform.GetComponent<TooltipInvoker>();
+        //     if(r == null) r = transform.GetComponentInChildren<TooltipInvoker>();
+        //     int charId = -1;
+        //     if(r != null && r.RuntimeParam != null)
+        //     {
 
-                r.RuntimeParam.Get("charId", out charId);
-                if (charId == -1) r.RuntimeParam.Get("CharId", out charId);
-                if (charId == -1) r.RuntimeParam.Get("NpcCharId", out charId);
-				// MyUtils.MyLog($"找到 TooltipInvoker {charId}");
-            }
-            return charId;
-        }
+        //         r.RuntimeParam.Get("charId", out charId);
+        //         if (charId == -1) r.RuntimeParam.Get("CharId", out charId);
+        //         if (charId == -1) r.RuntimeParam.Get("NpcCharId", out charId);
+		// 		// MyUtils.MyLog($"找到 TooltipInvoker {charId}");
+        //     }
+        //     return charId;
+        // }
 		#endregion
 
 		#region 使用 name 进行查找 (泛用性较高)
@@ -667,14 +668,28 @@ namespace NpcFace
 			if (avatar == null) return false;
 			if (idNameCache.TryGetValue(charId, out var curName))
 			{
-				if (curName != "")
-				{
-					if (npcRes.ContainsKey(curName))
-						return resLoad(avatar, instance, isTaiwu: false, npcRes[curName]);
-				}
+				return resLoadNpcName(avatar, instance, curName, noTaiwu:true);
 			}
 			return false;
 		}
+
+		// 不需要了，直接用id
+		// /// <summary>
+		// /// 根据接口信息 中的 name 尝试设置 普通npc  立绘
+		// /// </summary>
+		// public static bool TrySetNpcFaceByName(TaiwuAvatar avatar, CharacterAvatar? instance, CharacterDisplayData displayData)
+		// {
+		//     // MyUtils.MyLog($"TrySetNpcFaceByName displayData  {avatar}");
+		//     if (avatar == null) return false;
+		//     string curName = NameCenter.GetMonasticTitleOrDisplayName(displayData, isTaiwu: false);
+		//     if (curName != "")
+		//     {
+		// 		MyUtils.MyLog($"TrySetNpcFaceByName 找到名字 {curName}");
+		//         if (npcRes.ContainsKey(curName))
+		//             return resLoad(avatar, instance, isTaiwu: false, npcRes[curName]);
+		//     }
+		//     return false;
+		// }
 
 		/// <summary>
 		/// 根据接口信息 中的 name 尝试设置 普通npc  立绘
@@ -684,46 +699,13 @@ namespace NpcFace
             // MyUtils.MyLog($"TrySetNpcFaceByName relatedData {avatar}");
             if (avatar == null) return false;
             var curName = TryFindName(avatar.transform, maxUp: 3);
-            if (curName != "")
+			if (curName != "")
             {
-                //MyLog($"TrySetNpcFaceByName 找到名字 {curName}");
-                var taiwuDisplayName = SingletonObject.getInstance<BasicGameData>().TaiwuMonasticTitleOrDisplayName;
-                if (curName == taiwuDisplayName)
-                {
-                    return resLoad(avatar, instance, isTaiwu: true);
-                }
-                else
-                {
-                    if (npcRes.ContainsKey(curName))
-                    { 
-                        return resLoad(avatar, instance, isTaiwu: false, npcRes[curName]); 
-                    }
-                    else
-                    {
-						// MyUtils.MyLog($"TrySetNpcFaceByName 名字不对 {curName}");
-						return false;
-                    }
-                }
+				return resLoadNpcName(avatar, instance, curName, noTaiwu: false);
+                // MyLog($"TrySetNpcFaceByName 找到名字 {curName}");
             }
 			// MyUtils.MyLog($"TrySetNpcFaceByName 没找到名字");
 			return false;
-        }
-
-		/// <summary>
-		/// 根据接口信息 中的 name 尝试设置 普通npc  立绘
-		/// </summary>
-		public static bool TrySetNpcFaceByName(TaiwuAvatar avatar, CharacterAvatar? instance, CharacterDisplayData displayData)
-        {
-            // MyUtils.MyLog($"TrySetNpcFaceByName displayData  {avatar}");
-            if (avatar == null) return false;
-            string curName = NameCenter.GetMonasticTitleOrDisplayName(displayData, isTaiwu: false);
-            if (curName != "")
-            {
-				MyUtils.MyLog($"TrySetNpcFaceByName 找到名字 {curName}");
-                if (npcRes.ContainsKey(curName))
-                    return resLoad(avatar, instance, isTaiwu: false, npcRes[curName]);
-            }
-            return false;
         }
 
 		// 尝试寻找 name， maxUp 控制向上寻找的层数
@@ -752,7 +734,11 @@ namespace NpcFace
 		public static string TryGetNpcName(Transform transform)
         {
 			var sp = TryGetNpcNameSp(transform);
-			if (sp != null) return sp;
+			if (sp != null)
+			{
+				if(showFindLog) MyUtils.MyLog($"FindNameSp {sp}");
+				return sp;
+			}
 
 			var nameframe = transform.GetComponentInChildren<CommonCharacterNameFrame>();
 			if (nameframe)
@@ -780,10 +766,10 @@ namespace NpcFace
             }
             if (t)
             {
-                // MyUtils.MyLog($"找到 {transform}下的tmp  {t} {t.text}");
+				if (showFindLog) MyUtils.MyLog($"找到 {transform}下的tmp  {t} {t.text}");
                 return t.text;
             }
-			// MyUtils.MyLog($" {transform} 无 命名tmp ");
+			if (showFindLog) MyUtils.MyLog($" {transform} 无 命名tmp ");
 			
 
 
@@ -797,12 +783,13 @@ namespace NpcFace
                 {
                     var taiwuId = SingletonObject.getInstance<BasicGameData>().TaiwuCharId;
                     string curName = NameCenter.GetMonasticTitleOrDisplayName(charData, isTaiwu: charData.CharacterId == taiwuId);
-					// MyUtils.MyLog($"找到 {transform}下的 MouseTipDisplayer CharData {curName}");
+					if (showFindLog) MyUtils.MyLog($"找到 {transform}下的 MouseTipDisplayer CharData {curName}");
                     return curName;
                 }
 				mouseTipDisplayer.RuntimeParam.Get("characterId", out int charId);
 				if(idNameCache.ContainsKey(charId))
 				{
+					if (showFindLog) MyUtils.MyLog($"找到 {transform}下的 MouseTipDisplayer characterId {charId}->{idNameCache[charId]}");
 					return idNameCache[charId];
 				}
 			}
@@ -817,7 +804,7 @@ namespace NpcFace
             }
             if (t)
             {
-				// MyUtils.MyLog($"找到 refer 下的tmp {t} {t.text}");
+				if (showFindLog) MyUtils.MyLog($"找到 refer 下的tmp {t} : {t.text}");
 				return t.text;
             }
             return "";
@@ -834,7 +821,7 @@ namespace NpcFace
 					var r = transform.parent.parent?.GetChild(4)?.GetChild(0)?.GetChild(0);
 					if(r)
 					{
-						var t = r.GetComponent < TextMeshProUGUI>();
+						var t = r.GetComponent <TextMeshProUGUI>();
 						if (t) return t.text;
 						else { MyUtils.MyLog("事件窗口更新，需要适配"); return null; }
 					}
@@ -921,6 +908,14 @@ namespace NpcFace
 				if(sc)
 				{
 					return sc.CharName;
+				}
+
+				// 奇书阴阳眼， 直接返回太吾的名字
+				// ViewLegendaryBook/AnimRoot/PageNodeView/nodeViewHolder/YinYangNodes/Yin/BreakPlate/CombatIconRoot/AvatarMask/AvatarSmall
+				if (transform.parent.parent.name == "CombatIconRoot"
+				 && transform.parent.parent.parent.parent.parent.name == "YinYangNodes")
+				{
+					return SingletonObject.getInstance<BasicGameData>().TaiwuMonasticTitleOrDisplayName;
 				}
 
 				// 秘闻界面
@@ -1087,7 +1082,7 @@ namespace NpcFace
             {
                 return resLoad(__instance, null, isTaiwu:true);
             }
-            return TrySetNpcFaceByName(__instance, null, displayData);
+			return TrySetNpcFaceByIdName(__instance, null, displayData.CharacterId);
         }
 
 		[HarmonyPrefix, HarmonyPatch(typeof(TaiwuAvatar), "Refresh", argumentTypes: new Type[1] { typeof(AvatarRelatedData) })]
@@ -1144,7 +1139,7 @@ namespace NpcFace
 				return true;
 
 			// 对于特殊npc，进行特殊处理, 可以用立绘名
-			var curName = characterItem.GivenName;
+			var curName = characterItem.Surname + characterItem.GivenName;
 			var npcFaceName = characterItem.FixedAvatarName;
 			if (npcRes.ContainsKey(curName))
 				return !resLoad(__instance, null, isTaiwu: false, npcRes[curName]);
@@ -1171,7 +1166,7 @@ namespace NpcFace
 			{
 				CharacterItem characterItem = Character.Instance[characterTemplateId];
 				// 对于特殊npc，进行特殊处理, 可以用立绘名
-				var curName = characterItem.GivenName;
+				var curName = characterItem.Surname + characterItem.GivenName;
 				var npcFaceName = characterItem.FixedAvatarName;
 				if (npcRes.ContainsKey(curName))
 					return !resLoad(__instance, null, isTaiwu: false, npcRes[curName]);
@@ -1277,6 +1272,29 @@ namespace NpcFace
 		}
 
 		#region 资源加载
+		/// <summary>
+		/// 如果已经确认不是太吾，就传 noTaiwu=true
+		/// </summary>
+		private static bool resLoadNpcName(TaiwuAvatar avatar, CharacterAvatar? instance, string npcName, bool noTaiwu=false)
+		{
+			if(string.IsNullOrEmpty(npcName)) return false;
+			//	先判断是否太吾
+			if (!noTaiwu && npcName == SingletonObject.getInstance<BasicGameData>().TaiwuMonasticTitleOrDisplayName)
+			{
+				if(showLoadLog) MyUtils.MyLog($"resLoadNpcName taiwu {npcName}");
+				return resLoad(avatar, instance, isTaiwu: true);
+			}
+			else
+			{
+				if(npcRes.ContainsKey(npcName))
+				{
+					if(showLoadLog) MyUtils.MyLog($"resLoadNpcName npc {npcName}");
+					return resLoad(avatar, instance, isTaiwu: false, npcRes[npcName]);
+				}
+				return false;
+			}
+		}
+
 		/// <summary>
 		/// 太吾： resLoad(avatar, __instance, isTaiwu: true);
 		/// npc： resLoad(avatar, instance, isTaiwu: false, npcRes[curName]);

@@ -1,5 +1,12 @@
 
 
+1. public void Refresh(AvatarRelatedData relatedData, short characterTemplateId)
+	1. if (CreatingType.IsFixedPresetType(characterItem.CreatingType))
+		1. RefreshAsSpine
+		2. ResLoader.LoadModOrGameResource 
+	2. Refresh(relatedData);
+
+野兽 BeastCarrier
 
 # 文件路径读取
 TaiwuYingjiao.txt
