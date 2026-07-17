@@ -369,9 +369,12 @@ namespace NpcFace
             ModManager.GetSetting(ModIdStr, "npcNameIdx", ref npcNameIdx);
             ModManager.GetSetting(ModIdStr, "customNpc", ref customNpc);
             ModManager.GetSetting(ModIdStr, "npcNameCustom", ref npcNameCustom);
-            //MyLog($"{npcFace}, {npcNameIdx}, {customNpc}, {npcNameCustom}");
+			var showDebugLog = false;
+			ModManager.GetSetting(ModIdStr, "showDebugLog", ref showDebugLog);
+			showEntryLog = showFindLog = showLoadLog = showDebugLog;
+			//MyLog($"{npcFace}, {npcNameIdx}, {customNpc}, {npcNameCustom}");
 
-            npcRes.Clear();
+			npcRes.Clear();
             TryLoadNpc("npc1", "npcRes1", "npcAsset1");
             TryLoadNpc("npc2", "npcRes2", "npcAsset2");
             TryLoadNpc("npc3", "npcRes3", "npcAsset3");
@@ -1138,17 +1141,8 @@ namespace NpcFace
 			if (!CreatingType.IsFixedPresetType(characterItem.CreatingType)) // 放行到普通refresh
 				return true;
 
-			// 对于特殊npc，进行特殊处理, 可以用立绘名
-			var curName = characterItem.Surname + characterItem.GivenName;
-			var npcFaceName = characterItem.FixedAvatarName;
-			if (npcRes.ContainsKey(curName))
-				return !resLoad(__instance, null, isTaiwu: false, npcRes[curName]);
-			else if(npcFaceName != null && npcRes.ContainsKey(npcFaceName))
-				return !resLoad(__instance, null, isTaiwu: false, npcRes[npcFaceName]);
-			else
-			{
-				return true;
-			}
+			// 加载成功则不走后续逻辑，即return false，所以取反
+			return !resLoadFixedNpc(__instance, null, characterTemplateId, characterItem);
 		}
 
 
@@ -1159,23 +1153,13 @@ namespace NpcFace
 		public static bool RefreshAsSpine_Pre(TaiwuAvatar __instance, string spineName, string skinName)
 		{
 			if (!npcFace) return true;
-			if (showEntryLog) MyUtils.MyLog("RefreshAsSpine_Pre");
+			if (showEntryLog) MyUtils.MyLog($"RefreshAsSpine_Pre, {spineName}, {skinName}");
 
-			// 走原加载逻辑
+			// 判断是否需要替换
 			if (spineTemplate.TryGetValue(spineName, out int characterTemplateId))
 			{
-				CharacterItem characterItem = Character.Instance[characterTemplateId];
-				// 对于特殊npc，进行特殊处理, 可以用立绘名
-				var curName = characterItem.Surname + characterItem.GivenName;
-				var npcFaceName = characterItem.FixedAvatarName;
-				if (npcRes.ContainsKey(curName))
-					return !resLoad(__instance, null, isTaiwu: false, npcRes[curName]);
-				else if (npcFaceName != null && npcRes.ContainsKey(npcFaceName))
-					return !resLoad(__instance, null, isTaiwu: false, npcRes[npcFaceName]);
-				else
-				{
-					return true;
-				}
+				// 加载成功则不走后续逻辑，即return false，所以取反
+				return !resLoadFixedNpc(__instance, null, characterTemplateId);
 			}
 			return true;
 		}
@@ -1191,7 +1175,8 @@ namespace NpcFace
 		public static bool FillElement_Pre(CharacterAvatar __instance)
 		{
 			if (!npcFace) return true;
-			if (showEntryLog) MyUtils.MyLog("FillElement_Pre");
+			if (showEntryLog) MyUtils.MyLog($"FillElement_Pre id={__instance.CharacterId}");
+
 			var avatar = Traverse.Create(__instance).Field("_avatar").GetValue<TaiwuAvatar>();
 			QuickCheckNoInit(avatar, out var tobreak);
 			if (tobreak) return false;
@@ -1227,15 +1212,21 @@ namespace NpcFace
             if (!npcFace) return false;
             // MyUtils.MyLog($"FillElementPost");
             if (__instance == null) return false;
-            var taiwuCharId = SingletonObject.getInstance<BasicGameData>().TaiwuCharId;
+
+			var taiwuCharId = SingletonObject.getInstance<BasicGameData>().TaiwuCharId;
+			var avatar = Traverse.Create(__instance).Field("_avatar").GetValue<TaiwuAvatar>();
             if (__instance.CharacterId == taiwuCharId)
             {
-                var avatar = Traverse.Create(__instance).Field("_avatar").GetValue<TaiwuAvatar>();
                 return resLoad(avatar, __instance, isTaiwu: true);
             }
             else
             {
-				var avatar = Traverse.Create(__instance).Field("_avatar").GetValue<TaiwuAvatar>();
+				// 先检查是否特殊npc
+				var Item = Traverse.Create(__instance).Property("Item").GetValue<AvatarInfoMonitor>();
+				CharacterItem characterItem = Config.Character.Instance[Item.TemplateId];
+				if(Item.Character.IsDead && __instance.CanShowGrave) return false; // 跳过,让原逻辑处理
+				if(resLoadFixedNpc(avatar, __instance, Item.TemplateId, characterItem)) return true;
+				// 普通npc
 				return TrySetNpcFaceByIdName(avatar, __instance, __instance.CharacterId);
             }
         }
@@ -1272,6 +1263,20 @@ namespace NpcFace
 		}
 
 		#region 资源加载
+		private static bool resLoadFixedNpc(TaiwuAvatar avatar, CharacterAvatar? instance, int characterTemplateId, CharacterItem characterItem=null)
+		{
+			if(characterItem == null)
+				characterItem = Character.Instance[characterTemplateId];
+			// 对于特殊npc，进行特殊处理, 可以用 配置名 或 立绘名
+			var curName = characterItem.Surname + characterItem.GivenName;
+			var npcFaceName = characterItem.FixedAvatarName;
+			if (npcRes.ContainsKey(curName))
+				return resLoad(avatar, null, isTaiwu: false, npcRes[curName]);
+			else if (npcFaceName != null && npcRes.ContainsKey(npcFaceName))
+				return resLoad(avatar, null, isTaiwu: false, npcRes[npcFaceName]);
+			return false;
+		}
+
 		/// <summary>
 		/// 如果已经确认不是太吾，就传 noTaiwu=true
 		/// </summary>
