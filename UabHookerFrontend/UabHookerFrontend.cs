@@ -1164,7 +1164,7 @@ namespace UabHooker
             }
             if (logEntrySpine) MyUtils.MyLog("[HookSpine] 入口: sda=" + sdaName);
 
-            foreach (var kv in _activeSpine)
+            foreach (var kv in _activeSpine.OrderByDescending(kvp => kvp.Key.Length))
             {
                 // 用 sda.name 匹配
                 if (sdaName.IndexOf(kv.Key, StringComparison.OrdinalIgnoreCase) < 0)
@@ -1220,7 +1220,7 @@ namespace UabHooker
             if (_activeAvatar.Count == 0 || skeletonDataAsset == null) return;
             if (string.IsNullOrEmpty(sdaName)) return;
 
-            foreach (var kv in _activeAvatar)
+            foreach (var kv in _activeAvatar.OrderByDescending(kvp => kvp.Key.Length))
             {
                 // 用 sda.name 匹配
                 if (sdaName.IndexOf(kv.Key, StringComparison.OrdinalIgnoreCase) < 0)
@@ -1281,7 +1281,7 @@ namespace UabHooker
                 if (cover != null)
                 {
                     string coverName = cover.skeletonDataAsset?.name ?? "";
-                    foreach (var kv in _activeAvatar)
+                    foreach (var kv in _activeAvatar.OrderByDescending(kvp => kvp.Key.Length))
                     {
                         if (!coverName.Contains(kv.Key) && !coverName.StartsWith(kv.Key))
                             continue;
@@ -1401,8 +1401,8 @@ namespace UabHooker
             if (string.IsNullOrEmpty(sdaName)) return;
 			if (mainTexture == null) return;
 
-			// 按skel名称匹配
-			foreach (var skelKv in _activeSpineImg)
+			// 按skel名称匹配（按 key 长度降序，优先匹配更具体名称）
+			foreach (var skelKv in _activeSpineImg.OrderByDescending(kvp => kvp.Key.Length))
             {
                 if (sdaName.IndexOf(skelKv.Key, StringComparison.OrdinalIgnoreCase) < 0) continue;
 
