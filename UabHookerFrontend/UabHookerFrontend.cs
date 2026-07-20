@@ -46,6 +46,8 @@ namespace UabHooker
         private static Dictionary<string, List<SpineReplaceInfo>> _activeAvatar = new Dictionary<string, List<SpineReplaceInfo>>();
         // ← Spine 运行时缓存（避免反复创建 SkeletonDataAsset）
         private static Dictionary<string, SpineCachedAssets> _spineCache = new Dictionary<string, SpineCachedAssets>();
+        // ← Avatar 替换记录（SkeletonGraphic → lookupKey），供 cover 逻辑查询当前衣服匹配了哪个 key
+        private static Dictionary<SkeletonGraphic, string> _avatarLookupBySg = new Dictionary<SkeletonGraphic, string>();
 
         // ← 图集精灵源数据（含 enable 条件）
         private static Dictionary<string, Dictionary<string, List<SpriteReplaceInfo>>> _sourceAtlas = new Dictionary<string, Dictionary<string, List<SpriteReplaceInfo>>>();
@@ -1133,6 +1135,39 @@ namespace UabHooker
 			return false;
 		}
 
+		/// <summary>
+		/// 从 AvatarSkeleton 的 Clothing 部位组中找出主 SkeletonGraphic，
+		/// 返回 setupSkeletonGraphic_Pre 中记录的 lookupKey（即当前衣服匹配的配置 key）
+		/// </summary>
+		private static string GetRecordedClothingKey(AvatarSkeleton avatar)
+		{
+			try
+			{
+				object configs = Traverse.Create(avatar).Field("partGroupConfigurations").GetValue();
+				if (configs is Array arr)
+				{
+					foreach (var cfg in arr)
+					{
+						if (cfg == null) continue;
+						var tCfg = Traverse.Create(cfg);
+						object group = tCfg.Field("group").GetValue();
+						if (group != null && group.ToString() == "Clothing")
+						{
+							var mainGraphic = tCfg.Field("mainGraphic").GetValue() as Array;
+							if (mainGraphic != null && mainGraphic.Length > 0)
+							{
+								var sg = mainGraphic.GetValue(0) as SkeletonGraphic;
+								if (sg != null && _avatarLookupBySg.TryGetValue(sg, out string key))
+									return key;
+							}
+						}
+					}
+				}
+			}
+			catch { }
+			return null;
+		}
+
 		// ═══════════════════════════════════════════════════════════════
 		//  Hook 3a: SkeletonGraphic.Initialize — Spine 完整资源替换（简单 SkeletonGraphic）
 		//  替换 atlas + skel，强制 overwrite=true 确保 Skeleton + AnimationState 完整重建
@@ -1232,6 +1267,9 @@ namespace UabHooker
                 lookupKey = lookupKey.Substring(0, lookupKey.Length - "_SkeletonData".Length);
             if (_activeAvatar.TryGetValue(lookupKey, out var avatarList))
             {
+                // 记录此 SkeletonGraphic 匹配的 key，供 cover 逻辑使用
+                _avatarLookupBySg[target] = lookupKey;
+
                 foreach (var info in avatarList)
                 {
                     // objDir 过滤：检查对象名/路径后缀
@@ -1266,6 +1304,11 @@ namespace UabHooker
                     return;
                 }
             }
+            else
+            {
+                // 未匹配：清除旧记录，避免 Postfix 残留旧 cover
+                _avatarLookupBySg.Remove(target);
+            }
         }
 
         // ═══════════════════════════════════════════════════════════════
@@ -1288,11 +1331,9 @@ namespace UabHooker
                 if (cover != null)
                 {
                     string coverName = cover.skeletonDataAsset?.name ?? "";
-                    // 快速查表：去掉 _SkeletonData 后缀直接取 key
-                    string lookupKey = coverName;
-                    if (lookupKey.EndsWith("_SkeletonData", StringComparison.Ordinal))
-                        lookupKey = lookupKey.Substring(0, lookupKey.Length - "_SkeletonData".Length);
-                    if (_activeAvatar.TryGetValue(lookupKey, out var coverList) && coverList.Count > 0)
+                    // 用当前衣服主骨架的替换记录来查 cover 规则（而不是靠 clothingCover 自身的 sda 名称）
+                    string lookupKey = GetRecordedClothingKey(__instance);
+                    if (!string.IsNullOrEmpty(lookupKey) && _activeAvatar.TryGetValue(lookupKey, out var coverList) && coverList.Count > 0)
                     {
                         // cover 处理取第一个 enable 条目（objDir 不适用于 cover 场景）
                         var info = coverList[0];
