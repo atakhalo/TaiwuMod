@@ -1130,8 +1130,8 @@ namespace NpcFace
 			return TrySetNpcFaceByName(__instance, null, relatedData);
         }
 
-		[HarmonyPrefix, HarmonyPatch(typeof(TaiwuAvatar), "Refresh", argumentTypes: new Type[2] { typeof(AvatarRelatedData), typeof(short) })]
-		public static bool OnRefreshChar_Related_Pre(TaiwuAvatar __instance, AvatarRelatedData relatedData, short characterTemplateId)
+		[HarmonyPrefix, HarmonyPatch(typeof(TaiwuAvatar), "Refresh", argumentTypes: new Type[3] { typeof(AvatarRelatedData), typeof(short), typeof(sbyte) })]
+		public static bool OnRefreshChar_Related_Pre(TaiwuAvatar __instance, AvatarRelatedData relatedData, short characterTemplateId, sbyte xiangshuType)
 		{
 			if (!npcFace) return true;
 			if (showEntryLog) MyUtils.MyLog("OnRefreshChar_Related_Pre Template");
