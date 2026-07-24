@@ -1,4 +1,6 @@
-﻿using CharacterDataMonitor;
+﻿#pragma warning disable CS8618, CS8600, CS8603, CS8625, CS8601, CS8604
+
+using CharacterDataMonitor;
 using Config;
 using FrameWork;
 using FrameWork.ModSystem;
