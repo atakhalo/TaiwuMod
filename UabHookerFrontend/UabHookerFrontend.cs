@@ -179,6 +179,9 @@ namespace UabHooker
 		// 测试用设置
         private static bool enableSpineReplace = true;
 
+		// 重建协程引用，用于去抖（debounce），避免多次触发重复重建
+		private static Coroutine _rebuildCoroutine = null;
+
 		public override void Initialize()
         {
             MyUtils.modName = nameof(UabHooker);
@@ -294,6 +297,12 @@ namespace UabHooker
             // HookUab: 整包替换
             foreach (var hook in root.Elements("HookUab"))
             {
+                string hookEnableRaw = (string)hook.Attribute("enable") ?? "true";
+                if (!ParseEnableCondition(hookEnableRaw, modIdStr).IsEnabled())
+                {
+                    if (logScan) MyUtils.MyLog($"[HookUab] 跳过（enable={hookEnableRaw}）");
+                    continue;
+                }
                 foreach (var uab in hook.Elements("uab"))
                 {
                     string name = (string)uab.Attribute("name") ?? "";
@@ -314,6 +323,12 @@ namespace UabHooker
             // HookImg: 单图替换（走TryGetAssetBundleLoadData）
             foreach (var hook in root.Elements("HookImg"))
             {
+                string hookEnableRaw = (string)hook.Attribute("enable") ?? "true";
+                if (!ParseEnableCondition(hookEnableRaw, modIdStr).IsEnabled())
+                {
+                    if (logScan) MyUtils.MyLog($"[HookImg] 跳过（enable={hookEnableRaw}）");
+                    continue;
+                }
                 foreach (var uab in hook.Elements("uab"))
                 {
                     string bundleName = (string)uab.Attribute("name") ?? "";
@@ -415,6 +430,12 @@ namespace UabHooker
             // HookSpineImg: Spine图片替换
             foreach (var hook in root.Elements("HookSpineImg"))
             {
+                string hookEnableRaw = (string)hook.Attribute("enable") ?? "true";
+                if (!ParseEnableCondition(hookEnableRaw, modIdStr).IsEnabled())
+                {
+                    if (logScan) MyUtils.MyLog($"[HookSpineImg] 跳过（enable={hookEnableRaw}）");
+                    continue;
+                }
                 foreach (var skel in hook.Elements("skel"))
                 {
                     string skelName = (string)skel.Attribute("name") ?? "";
@@ -472,6 +493,12 @@ namespace UabHooker
             // HookAtlas: 图集精灵替换（替换 SpriteAtlas.GetSprite 返回的精灵）
             foreach (var hook in root.Elements("HookAtlas"))
             {
+                string hookEnableRaw = (string)hook.Attribute("enable") ?? "true";
+                if (!ParseEnableCondition(hookEnableRaw, modIdStr).IsEnabled())
+                {
+                    if (logScan) MyUtils.MyLog($"[HookAtlas] 跳过（enable={hookEnableRaw}）");
+                    continue;
+                }
                 foreach (var atlas in hook.Elements("atlas"))
                 {
                     string atlasName = (string)atlas.Attribute("name") ?? "";
@@ -574,6 +601,12 @@ namespace UabHooker
             // HookSpine: Spine 完整资源替换（简单 SkeletonGraphic，atlas + skel）
             foreach (var hook in root.Elements("HookSpine"))
             {
+                string hookEnableRaw = (string)hook.Attribute("enable") ?? "true";
+                if (!ParseEnableCondition(hookEnableRaw, modIdStr).IsEnabled())
+                {
+                    if (logScan) MyUtils.MyLog($"[HookSpine] 跳过（enable={hookEnableRaw}）");
+                    continue;
+                }
                 foreach (var spine in hook.Elements("spine"))
                 {
                     string spineName = (string)spine.Attribute("name") ?? "";
@@ -682,6 +715,12 @@ namespace UabHooker
             // HookAvatar: AvatarSpine 完整资源替换（AvatarSkeleton，含 cover/coverKeep）
             foreach (var hook in root.Elements("HookAvatar"))
             {
+                string hookEnableRaw = (string)hook.Attribute("enable") ?? "true";
+                if (!ParseEnableCondition(hookEnableRaw, modIdStr).IsEnabled())
+                {
+                    if (logScan) MyUtils.MyLog($"[HookAvatar] 跳过（enable={hookEnableRaw}）");
+                    continue;
+                }
                 foreach (var spine in hook.Elements("spine"))
                 {
                     string spineName = (string)spine.Attribute("name") ?? "";
@@ -891,8 +930,10 @@ namespace UabHooker
 				reScan = false;
 			}
 
-			// 延迟一帧刷新有效条目，等附属 mod 设置更新
-			GameApp.Instance.StartCoroutine(DelayedRebuild());
+			// 延迟一帧刷新有效条目，等附属 mod 设置更新（去抖合并）
+			if (_rebuildCoroutine != null)
+				GameApp.Instance.StopCoroutine(_rebuildCoroutine);
+			_rebuildCoroutine = GameApp.Instance.StartCoroutine(DelayedRebuild());
 
 			// 清理缓存，以重新加载资源
 			if(clearCache)
@@ -951,6 +992,7 @@ namespace UabHooker
         {
             yield return null;
             RebuildActiveEntries();
+            _rebuildCoroutine = null;
         }
 
         /// <summary>
@@ -964,8 +1006,10 @@ namespace UabHooker
             string key = modId.ToString();
             if (_watchedModIdStrs.Contains(key))
             {
-                MyUtils.MyLog($"[Hook] 检测到关注的 mod 设置变化: {key}，重建有效条目");
-                RebuildActiveEntries();
+                MyUtils.MyLog($"[Hook] 检测到关注的 mod 设置变化: {key}，延迟重建有效条目");
+				if (_rebuildCoroutine != null)
+					GameApp.Instance.StopCoroutine(_rebuildCoroutine);
+				_rebuildCoroutine = GameApp.Instance.StartCoroutine(DelayedRebuild());
             }
         }
 
@@ -975,6 +1019,7 @@ namespace UabHooker
 
         private static void RebuildActiveEntries()
         {
+			MyUtils.MyLog("[Hook] 设置重建");
             // _replaceUab（list 结构，取第一个 enable 的）
             _activeUab.Clear();
             foreach (var kv in _replaceUab)
