@@ -1,3 +1,5 @@
+#pragma warning disable CS8618, CS8600, CS8603, CS8625, CS8601, CS8604
+
 using HarmonyLib;
 using FrameWork;
 using FrameWork.ModSystem;
@@ -97,8 +99,6 @@ namespace UabHooker
         // ← 精灵替换信息（含可选的 w/h 尺寸、坐标）
         private class SpriteReplaceInfo : FileReplaceInfo
         {
-            public int w = -1; // -1 表示不指定，使用原始尺寸
-            public int h = -1;
             public bool hasPos = false; // 是否指定了 posx/posy
             public float posX = 0;
             public float posY = 0;
@@ -159,8 +159,16 @@ namespace UabHooker
         // ← 贴图缓存（文件路径 → Texture2D）
         private static Dictionary<string, Texture2D> _texCache = new Dictionary<string, Texture2D>();
 
-        // ← 日志开关
-        private static bool logScan = false;
+		// 是否已首次扫描
+		private static bool initScan = false;
+
+		// 一些设置
+		// 设置变更时重新扫描
+		private static bool reScan = false;
+		// 设置变更时清理缓存
+		private static bool clearCache = false;
+		// 日志开关
+		private static bool logScan = false;
 		private static bool logReplace = true;
 		private static bool logEntryUab = false;
         private static bool logEntryImg = false;
@@ -168,23 +176,15 @@ namespace UabHooker
         private static bool logEntryAtlas = false;
         private static bool logEntrySpine = false;
         private static bool logEntryAvatar = false;
+		// 测试用设置
         private static bool enableSpineReplace = true;
 
-        public override void Initialize()
+		public override void Initialize()
         {
             MyUtils.modName = nameof(UabHooker);
             MyUtils.MyLog("Initialize");
 
-			UpdateSetting();
-			// 扫描所有启用mod的uabhook.xml
-			ScanConfigs();
-
             harmony = Harmony.CreateAndPatchAll(typeof(UabHookerFrontendPlugin));
-
-            MyUtils.MyLog($"初始化完成: Uab={_replaceUab.Sum(kv=>kv.Value.Count)}, Img={_replaceImg.Sum(kv=>kv.Value.Sum(kv2=>kv2.Value.Count))}, SpineImg={_replaceSpineImg.Sum(kv=>kv.Value.Sum(kv2=>kv2.Value.Count))}, Spine={_replaceSpine.Sum(kv=>kv.Value.Count)}, Avatar={_replaceAvatar.Sum(kv=>kv.Value.Count)}, Atlas={_sourceAtlas.Sum(kv=>kv.Value.Sum(kv2=>kv2.Value.Count))}");
-
-            // 延迟一帧刷新有效条目，等所有 mod 设置还原完成
-            GameApp.Instance.StartCoroutine(DelayedRebuild());
         }
 
         // ═══════════════════════════════════════════════════════════════
@@ -864,12 +864,72 @@ namespace UabHooker
         {
 			UpdateSetting();
 
-			// 首次启动时延迟重建，等所有 mod 设置还原
+			// 扫描所有启用mod的uabhook.xml
+			if(!initScan)
+			{
+				ScanConfigs();
+				initScan = true;
+				MyUtils.MyLog($"初始化扫描完成: Uab={_replaceUab.Sum(kv => kv.Value.Count)}, Img={_replaceImg.Sum(kv => kv.Value.Sum(kv2 => kv2.Value.Count))}, SpineImg={_replaceSpineImg.Sum(kv => kv.Value.Sum(kv2 => kv2.Value.Count))}, Spine={_replaceSpine.Sum(kv => kv.Value.Count)}, Avatar={_replaceAvatar.Sum(kv => kv.Value.Count)}, Atlas={_sourceAtlas.Sum(kv => kv.Value.Sum(kv2 => kv2.Value.Count))}");
+			}
+			else if(reScan)
+			{
+				MyUtils.MyLog("重新扫描，清理旧数据...");
+
+				// 清理源数据字典，避免重复追加
+				_replaceUab.Clear();
+				_replaceImg.Clear();
+				_replaceSpineImg.Clear();
+				_replaceSpine.Clear();
+				_replaceAvatar.Clear();
+				_sourceAtlas.Clear();
+				_watchedModIdStrs.Clear();
+
+				ScanConfigs();
+				MyUtils.MyLog($"重新扫描完成: Uab={_replaceUab.Sum(kv => kv.Value.Count)}, Img={_replaceImg.Sum(kv => kv.Value.Sum(kv2 => kv2.Value.Count))}, SpineImg={_replaceSpineImg.Sum(kv => kv.Value.Sum(kv2 => kv2.Value.Count))}, Spine={_replaceSpine.Sum(kv => kv.Value.Count)}, Avatar={_replaceAvatar.Sum(kv => kv.Value.Count)}, Atlas={_sourceAtlas.Sum(kv => kv.Value.Sum(kv2 => kv2.Value.Count))}");
+
+				// 重置开关
+				reScan = false;
+			}
+
+			// 延迟一帧刷新有效条目，等附属 mod 设置更新
 			GameApp.Instance.StartCoroutine(DelayedRebuild());
+
+			// 清理缓存，以重新加载资源
+			if(clearCache)
+			{
+				MyUtils.MyLog($"清理缓存: _texCache={_texCache.Count}, _spineCache={_spineCache.Count}");
+
+				// 销毁 spine 缓存（AtlasAsset + SkeletonDataAsset + Textures）
+				foreach (var kv in _spineCache)
+				{
+					kv.Value.Destroy();
+				}
+				_spineCache.Clear();
+
+				// 销毁贴图缓存
+				foreach (var kv in _texCache)
+				{
+					if (kv.Value != null)
+						UnityEngine.Object.Destroy(kv.Value);
+				}
+				_texCache.Clear();
+
+				// 清理 Avatar 查找记录，避免引用失效的 SkeletonGraphic
+				_avatarLookupBySg.Clear();
+
+				// 重置开关，避免每帧重复清理
+				clearCache = false;
+
+				MyUtils.MyLog("缓存清理完成");
+			}
         }
 
 		public void UpdateSetting()
 		{
+			ModManager.GetSetting(ModIdStr, "reScan", ref reScan);
+			ModManager.GetSetting(ModIdStr, "clearCache", ref clearCache);
+			MyUtils.MyLog($"reScan={reScan}, clearCache={clearCache}");
+
 			ModManager.GetSetting(ModIdStr, "logScan", ref logScan);
 			ModManager.GetSetting(ModIdStr, "logReplace", ref logReplace);
 			ModManager.GetSetting(ModIdStr, "logEntryUab", ref logEntryUab);
