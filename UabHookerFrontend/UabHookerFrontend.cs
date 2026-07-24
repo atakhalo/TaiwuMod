@@ -317,38 +317,8 @@ namespace UabHooker
                 foreach (var uab in hook.Elements("uab"))
                 {
                     string bundleName = (string)uab.Attribute("name") ?? "";
-                    string to = ResolveToPath((string)uab.Attribute("to") ?? "", baseDir);
-                    string torandRaw = (string)uab.Attribute("torand") ?? "";
                     string uabEnableRaw = (string)uab.Attribute("enable") ?? "true";
                     if (string.IsNullOrEmpty(bundleName)) continue;
-
-                    // 整包替换（to 或 torand）
-                    if (!string.IsNullOrEmpty(to) || !string.IsNullOrEmpty(torandRaw))
-                    {
-                        string absTorand = string.IsNullOrEmpty(torandRaw) ? "" : Path.Combine(baseDir, torandRaw);
-                        var uabInfo = new FileReplaceInfo { filePath = to };
-                        if (!string.IsNullOrEmpty(absTorand) && Directory.Exists(absTorand))
-                        {
-                            uabInfo.toRandFolder = absTorand;
-                            uabInfo.toRandFiles = Directory.GetFiles(absTorand, "*", SearchOption.AllDirectories)
-                                .Where(f => IsImageFile(f)).ToList();
-                        }
-                        uabInfo.enableCond = ParseEnableCondition(uabEnableRaw, modIdStr);
-                        if (uabInfo.enableCond.type == EnableCondition.CondType.Static && !uabInfo.enableCond.staticValue)
-                            continue;
-                        if (!_replaceUab.TryGetValue(bundleName, out var list))
-                            _replaceUab[bundleName] = list = new List<FileReplaceInfo>();
-                        list.Add(uabInfo);
-                        if (uabInfo.toRandFiles.Count > 0)
-                        {
-                            if (logScan) MyUtils.MyLog($"配置[HookImg->整包][随机] {bundleName}[{list.Count-1}] -> torand={absTorand} ({uabInfo.toRandFiles.Count} files)");
-                        }
-                        else
-                        {
-                            if (logScan) MyUtils.MyLog($"配置[HookImg->整包] {bundleName}[{list.Count-1}] -> {to}");
-                        }
-                        continue;
-                    }
 
                     if (!_replaceImg.TryGetValue(bundleName, out var map))
                         _replaceImg[bundleName] = map = new Dictionary<string, List<FileReplaceInfo>>();
