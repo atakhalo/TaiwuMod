@@ -26,9 +26,14 @@ namespace ConfigHook
 		private static readonly Logger logger = LogManager.GetCurrentClassLogger();
 
 		public static bool logScan = true;
+		public static bool reloadConfigs = false;
+		private static bool initScan = false;
 
 		/// <summary>ConfigName → (TemplateId → (FieldName → RawStringValue))</summary>
 		private static Dictionary<string, Dictionary<int, Dictionary<string, string>>> _configOverrides;
+		/// <summary>ConfigName → (TemplateId → (FieldName → 原始值))，用于还原覆盖</summary>
+		private static Dictionary<string, Dictionary<int, Dictionary<string, object>>> _originalValues
+			= new Dictionary<string, Dictionary<int, Dictionary<string, object>>>();
 
 		public static void MyLog(string log)
 		{
@@ -40,13 +45,7 @@ namespace ConfigHook
 			MyLog("Backend Initialize");
 			harmony = Harmony.CreateAndPatchAll(typeof(ConfigHookBackendPlugin));
 
-			// 延迟扫描，等待所有 mod 初始化完成后再执行
-			System.Threading.Timer? initTimer = null;
-			initTimer = new System.Threading.Timer(_ =>
-			{
-				initTimer?.Dispose();
-				ScanAndApplyConfigs();
-			}, null, 1000, System.Threading.Timeout.Infinite);
+			// 首次扫描已移到 OnModSettingUpdate 中执行
 		}
 
 		public override void Dispose()
@@ -57,6 +56,29 @@ namespace ConfigHook
 		public override void OnModSettingUpdate()
 		{
 			DomainManager.Mod.GetSetting(ModIdStr, "logScan", ref logScan);
+			DomainManager.Mod.GetSetting(ModIdStr, "reloadConfigs", ref reloadConfigs);
+
+			// 首次扫描：延迟 100ms，等所有 mod 初始化完毕后再执行
+			if (!initScan)
+			{
+				initScan = true;
+				System.Threading.Timer? initTimer = null;
+				initTimer = new System.Threading.Timer(_ =>
+				{
+					initTimer?.Dispose();
+					ScanAndApplyConfigs();
+				}, null, 100, System.Threading.Timeout.Infinite);
+			}
+			else if (reloadConfigs) // 非首次时才处理重新加载
+			{
+				reloadConfigs = false;
+				System.Threading.Timer? t = null;
+				t = new System.Threading.Timer(_ =>
+				{
+					t?.Dispose();
+					ReloadConfigs();
+				}, null, 100, System.Threading.Timeout.Infinite);
+			}
 		}
 
 		// ============================================================
@@ -99,6 +121,14 @@ namespace ConfigHook
 				string className = Path.GetFileNameWithoutExtension(csvFile);
 				LoadCsvOverrides(className, csvFile);
 			}
+		}
+
+		private void ReloadConfigs()
+		{
+			MyLog("重新加载配置...");
+			RestoreOverrides();
+			_configOverrides.Clear();
+			ScanAndApplyConfigs();
 		}
 
 		#region ConfigHook Core — 前后端逻辑一致，同步修改时请同步两端
@@ -220,6 +250,13 @@ namespace ConfigHook
 						try
 						{
 							object converted = ConvertValue(rawValue, field.FieldType);
+							// 保存原始值（仅首次覆盖时记录）
+							if (!_originalValues.ContainsKey(className))
+								_originalValues[className] = new Dictionary<int, Dictionary<string, object>>();
+							if (!_originalValues[className].ContainsKey(templateId))
+								_originalValues[className][templateId] = new Dictionary<string, object>();
+							if (!_originalValues[className][templateId].ContainsKey(fieldName))
+								_originalValues[className][templateId][fieldName] = field.GetValue(item);
 							field.SetValue(item, converted);
 							appliedCount++;
 						}
@@ -233,6 +270,38 @@ namespace ConfigHook
 				if (appliedCount > 0 || logScan)
 					MyLog($"  [成功] {className}: 修改了 {appliedCount} 个字段");
 			}
+		}
+
+		private void RestoreOverrides()
+		{
+			int count = 0;
+			foreach (var classKvp in _originalValues)
+			{
+				string className = classKvp.Key;
+				object configInstance = GetConfigInstance(className);
+				if (configInstance == null) continue;
+				Type configType = configInstance.GetType();
+				PropertyInfo indexer = FindIndexer(configType);
+				if (indexer == null) continue;
+				Type itemType = GetItemType(configType);
+				if (itemType == null) continue;
+				foreach (var idKvp in classKvp.Value)
+				{
+					object item = indexer.GetValue(configInstance, new object[] { idKvp.Key });
+					if (item == null) continue;
+					foreach (var fieldKvp in idKvp.Value)
+					{
+						FieldInfo field = itemType.GetField(fieldKvp.Key);
+						if (field != null)
+						{
+							field.SetValue(item, fieldKvp.Value);
+							count++;
+						}
+					}
+				}
+			}
+			_originalValues.Clear();
+			MyLog($"  还原了 {count} 个字段");
 		}
 
 		// ============================================================

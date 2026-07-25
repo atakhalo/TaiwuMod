@@ -33,9 +33,14 @@ namespace ConfigHook
 		private Harmony harmony;
 
 		public static bool logScan = true;
+		public static bool reloadConfigs = false;
+		private static bool initScan = false;
 
 		/// <summary>ConfigName → (TemplateId → (FieldName → RawStringValue))</summary>
 		private static Dictionary<string, Dictionary<int, Dictionary<string, string>>> _configOverrides;
+		/// <summary>ConfigName → (TemplateId → (FieldName → 原始值))，用于还原覆盖</summary>
+		private static Dictionary<string, Dictionary<int, Dictionary<string, object>>> _originalValues
+			= new Dictionary<string, Dictionary<int, Dictionary<string, object>>>();
 
 		public override void Initialize()
 		{
@@ -44,8 +49,7 @@ namespace ConfigHook
 
 			harmony = Harmony.CreateAndPatchAll(typeof(ConfigHookFrontendPlugin));
 
-			// 延迟扫描，等待所有 mod 初始化完成后再执行
-			MyUtils.DelayCall(ScanAndApplyConfigs, 0, true);
+			// 首次扫描已移到 OnModSettingUpdate 中执行
 		}
 
 		public override void Dispose()
@@ -59,6 +63,19 @@ namespace ConfigHook
 		public override void OnModSettingUpdate()
 		{
 			ModManager.GetSetting(ModIdStr, "logScan", ref logScan);
+			ModManager.GetSetting(ModIdStr, "reloadConfigs", ref reloadConfigs);
+
+			// 首次扫描：等所有 mod 设置更新完毕后再执行
+			if (!initScan)
+			{
+				initScan = true;
+				MyUtils.DelayCall(ScanAndApplyConfigs, 0, true);
+			}
+			else if (reloadConfigs) // 非首次时才处理重新加载
+			{
+				reloadConfigs = false;
+				MyUtils.DelayCall(ReloadConfigs, 0, true);
+			}
 		}
 
 		// ============================================================
@@ -89,8 +106,15 @@ namespace ConfigHook
 				}
 			}
 
-			// 将覆盖数据应用到已初始化的 Config 实例
 			ApplyAllOverrides();
+		}
+
+		private void ReloadConfigs()
+		{
+			MyUtils.MyLog("重新加载配置...");
+			RestoreOverrides();
+			_configOverrides.Clear();
+			ScanAndApplyConfigs();
 		}
 
 		#region ConfigHook Core — 前后端一致，同步修改时请同步两端
@@ -216,6 +240,13 @@ namespace ConfigHook
 						try
 						{
 							object converted = ConvertValue(rawValue, field.FieldType);
+							// 保存原始值（仅首次覆盖时记录）
+							if (!_originalValues.ContainsKey(className))
+								_originalValues[className] = new Dictionary<int, Dictionary<string, object>>();
+							if (!_originalValues[className].ContainsKey(templateId))
+								_originalValues[className][templateId] = new Dictionary<string, object>();
+							if (!_originalValues[className][templateId].ContainsKey(fieldName))
+								_originalValues[className][templateId][fieldName] = field.GetValue(item);
 							field.SetValue(item, converted);
 							appliedCount++;
 						}
@@ -228,6 +259,38 @@ namespace ConfigHook
 
 				MyUtils.MyLog($"  [成功] {className}: 修改了 {appliedCount} 个字段");
 			}
+		}
+
+		private void RestoreOverrides()
+		{
+			int count = 0;
+			foreach (var classKvp in _originalValues)
+			{
+				string className = classKvp.Key;
+				object configInstance = GetConfigInstance(className);
+				if (configInstance == null) continue;
+				Type configType = configInstance.GetType();
+				PropertyInfo indexer = FindIndexer(configType);
+				if (indexer == null) continue;
+				Type itemType = GetItemType(configType);
+				if (itemType == null) continue;
+				foreach (var idKvp in classKvp.Value)
+				{
+					object item = indexer.GetValue(configInstance, new object[] { idKvp.Key });
+					if (item == null) continue;
+					foreach (var fieldKvp in idKvp.Value)
+					{
+						FieldInfo field = itemType.GetField(fieldKvp.Key);
+						if (field != null)
+						{
+							field.SetValue(item, fieldKvp.Value);
+							count++;
+						}
+					}
+				}
+			}
+			_originalValues.Clear();
+			MyUtils.MyLog($"  还原了 {count} 个字段");
 		}
 
 		// ============================================================
