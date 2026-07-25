@@ -9,6 +9,8 @@ using HarmonyLib;
 using Newtonsoft.Json;
 using NLog;
 using System;
+using YamlDotNet.Serialization;
+using YamlDotNet.Serialization.NamingConventions;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
@@ -110,16 +112,49 @@ namespace ConfigHook
 			string yamlPath = Path.Combine(dir, "configHook.yaml");
 			if (!File.Exists(yamlPath)) return;
 
-			string csvDir = Path.Combine(dir, "configHook");
-			if (!Directory.Exists(csvDir)) return;
-
 			string title = DomainManager.Mod.GetModTitle(modIdStr);
 			MyLog($"发现 configHook 配置: {title}");
 
+			ProcessModConfigs(dir, yamlPath, modIdStr);
+		}
+
+		/// <summary>读取并应用单个 mod 的 configHook.yaml</summary>
+		private void ProcessModConfigs(string modDir, string yamlPath, string modIdStr)
+		{
+			string yamlText = File.ReadAllText(yamlPath, Encoding.UTF8);
+			if (string.IsNullOrWhiteSpace(yamlText))
+			{
+				LegacyScanCsvDir(modDir);
+				return;
+			}
+
+			try
+			{
+				var deserializer = new DeserializerBuilder()
+					.WithNamingConvention(UnderscoredNamingConvention.Instance)
+					.Build();
+				var cfg = deserializer.Deserialize<HookConfig>(yamlText);
+				if (cfg != null)
+					ProcessYamlConfig(modDir, cfg, modIdStr);
+				else
+					LegacyScanCsvDir(modDir);
+			}
+			catch (Exception ex)
+			{
+				MyLog($"  [错误] YAML 解析失败: {ex.Message}");
+				LegacyScanCsvDir(modDir);
+			}
+		}
+
+		/// <summary>向后兼容：扫描 configHook/*.csv</summary>
+		private void LegacyScanCsvDir(string modDir)
+		{
+			string csvDir = Path.Combine(modDir, "configHook");
+			if (!Directory.Exists(csvDir)) return;
 			foreach (string csvFile in Directory.GetFiles(csvDir, "*.csv"))
 			{
 				string className = Path.GetFileNameWithoutExtension(csvFile);
-				LoadCsvOverrides(className, csvFile);
+				LoadCsvOverrides(className, csvFile, null);
 			}
 		}
 
@@ -131,12 +166,43 @@ namespace ConfigHook
 			ScanAndApplyConfigs();
 		}
 
+		/// <summary>解析 enabled 表达式</summary>
+		private bool EvaluateEnabled(string expr, string modIdStr)
+		{
+			if (string.IsNullOrEmpty(expr) || expr == "true") return true;
+			if (expr == "false") return false;
+
+			if (expr.StartsWith("complex:"))
+			{
+				string[] parts = expr.Substring(8).Split('&');
+				return parts.All(p => EvaluateEnabled(p.Trim(), modIdStr));
+			}
+			if (expr.StartsWith("Toggle:"))
+			{
+				string key = expr.Substring(7);
+				bool val = true;
+				DomainManager.Mod.GetSetting(modIdStr, key, ref val);
+				return val;
+			}
+			if (expr.StartsWith("Dropdown:"))
+			{
+				string[] parts = expr.Split(':');
+				if (parts.Length >= 3 && int.TryParse(parts[2], out int expected))
+				{
+					int val = 0;
+					DomainManager.Mod.GetSetting(modIdStr, parts[1], ref val);
+					return val == expected;
+				}
+			}
+			return bool.TryParse(expr, out bool r) && r;
+		}
+
 		#region ConfigHook Core — 前后端逻辑一致，同步修改时请同步两端
 		// ============================================================
 		//  解析 CSV → _configOverrides
 		// ============================================================
 
-		private void LoadCsvOverrides(string className, string csvPath)
+		private void LoadCsvOverrides(string className, string csvPath, HashSet<int> skipIds = null)
 		{
 			string[] lines = File.ReadAllLines(csvPath, Encoding.UTF8);
 			if (lines.Length < 2) return;
@@ -166,6 +232,7 @@ namespace ConfigHook
 				if (fields.Length <= idIdx) continue;
 
 				if (!int.TryParse(fields[idIdx], out int templateId)) continue;
+				if (skipIds != null && skipIds.Contains(templateId)) continue;
 
 				var fieldDict = new Dictionary<string, string>();
 				for (int j = 0; j < headers.Length; j++)
@@ -178,7 +245,13 @@ namespace ConfigHook
 				}
 
 				if (fieldDict.Count > 0)
-					classDict[templateId] = fieldDict;
+				{
+					if (!classDict.ContainsKey(templateId))
+						classDict[templateId] = new Dictionary<string, string>();
+					foreach (var kv in fieldDict)
+						if (!classDict[templateId].ContainsKey(kv.Key))
+							classDict[templateId][kv.Key] = kv.Value;
+				}
 			}
 		}
 
@@ -302,6 +375,147 @@ namespace ConfigHook
 			}
 			_originalValues.Clear();
 			MyLog($"  还原了 {count} 个字段");
+		}
+
+		// ============================================================
+		//  YAML 配置模型
+		// ============================================================
+
+		public class HookConfig
+		{
+			public string Enabled { get; set; } = "true";
+			/// <summary>旧版兼容：单目录路径</summary>
+			public string CsvDir { get; set; }
+			/// <summary>新版：多目录列表，每个可独立控制</summary>
+			public List<CsvDirEntry> CsvDirs { get; set; }
+			public List<CsvFileEntry> CsvFiles { get; set; }
+		}
+
+		public class CsvDirEntry
+		{
+			public string Dir { get; set; }
+			public string Enabled { get; set; } = "true";
+		}
+
+		public class CsvFileEntry
+		{
+			/// <summary>限定作用的目录（不填则对所有目录生效）</summary>
+			public string Dir { get; set; }
+			public string Name { get; set; }
+			public string File { get; set; }
+			public string Enabled { get; set; } = "true";
+			public List<ItemEntry> Items { get; set; }
+			/// <summary>子条目：有此项时自身上级字段（Dir）作为作用域</summary>
+			public List<CsvFileEntry> Files { get; set; }
+		}
+
+		public class ItemEntry
+		{
+			public int Id { get; set; }
+			public string Enabled { get; set; } = "true";
+		}
+
+		/// <summary>按 YAML 配置处理 csv_files</summary>
+		private void ProcessYamlConfig(string modDir, HookConfig cfg, string modIdStr)
+		{
+			if (!EvaluateEnabled(cfg.Enabled, modIdStr)) return;
+
+			// 1. 构建活跃目录列表
+			var activeDirs = new List<string>();
+			if (cfg.CsvDirs != null && cfg.CsvDirs.Count > 0)
+			{
+				foreach (var de in cfg.CsvDirs)
+				{
+					if (!EvaluateEnabled(de.Enabled, modIdStr)) continue;
+					activeDirs.Add(Path.Combine(modDir, de.Dir ?? "configHook"));
+				}
+			}
+			else if (!string.IsNullOrEmpty(cfg.CsvDir))
+			{
+				activeDirs.Add(Path.Combine(modDir, cfg.CsvDir));
+			}
+			else
+			{
+				activeDirs.Add(Path.Combine(modDir, "configHook"));
+			}
+			if (activeDirs.Count == 0) return;
+
+			// 2. 无 csv_files → 扫描每个活跃目录（向后兼容）
+			if (cfg.CsvFiles == null || cfg.CsvFiles.Count == 0)
+			{
+				foreach (var dir in activeDirs)
+				{
+					if (!Directory.Exists(dir)) continue;
+					foreach (string f in Directory.GetFiles(dir, "*.csv"))
+						LoadCsvOverrides(Path.GetFileNameWithoutExtension(f), f, null);
+				}
+				return;
+			}
+
+			// 3. 逐条处理 csv_files（含分组 Files 子条目）
+			foreach (var entry in ExpandGroupEntries(cfg.CsvFiles))
+			{
+				if (string.IsNullOrEmpty(entry.Name)) continue;
+				if (!EvaluateEnabled(entry.Enabled, modIdStr)) continue;
+
+				string csvName = string.IsNullOrEmpty(entry.File) ? entry.Name + ".csv" : entry.File;
+
+				// 确定作用于哪些目录
+				var targetDirs = new List<string>();
+				if (!string.IsNullOrEmpty(entry.Dir))
+				{
+					string ed = Path.Combine(modDir, entry.Dir);
+					if (activeDirs.Any(d => string.Equals(d, ed, StringComparison.OrdinalIgnoreCase)))
+						targetDirs.Add(ed);
+				}
+				else
+				{
+					targetDirs.AddRange(activeDirs);
+				}
+
+				foreach (var dir in targetDirs)
+				{
+					string fullPath = Path.Combine(dir, csvName);
+					if (!File.Exists(fullPath))
+					{
+						if (logScan)
+							MyLog($"  [跳过] CSV 不存在: {fullPath}");
+						continue;
+					}
+
+					// 构建跳过 ID 集合
+					HashSet<int> skipIds = null;
+					if (entry.Items != null && entry.Items.Count > 0)
+					{
+						skipIds = new HashSet<int>();
+						foreach (var item in entry.Items)
+							if (!EvaluateEnabled(item.Enabled, modIdStr))
+								skipIds.Add(item.Id);
+					}
+
+					LoadCsvOverrides(entry.Name, fullPath, skipIds);
+				}
+			}
+		}
+
+		/// <summary>展开分组条目（带 Files 的拆成多个普通条目，继承父级 Dir）</summary>
+		private IEnumerable<CsvFileEntry> ExpandGroupEntries(List<CsvFileEntry> entries)
+		{
+			foreach (var entry in entries)
+			{
+				if (entry.Files != null && entry.Files.Count > 0)
+				{
+					foreach (var sub in entry.Files)
+					{
+						sub.Dir = entry.Dir; // 继承父级作用域
+						yield return sub;
+					}
+				}
+				else
+				{
+					yield return entry;
+				}
+			}
 		}
 
 		// ============================================================
