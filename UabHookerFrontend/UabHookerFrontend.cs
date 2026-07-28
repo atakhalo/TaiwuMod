@@ -1135,10 +1135,6 @@ namespace UabHooker
         public static bool ResourcePackage_Pre(Type type, List<string> dependenceList, string assetPath, string assetName,
             ref ValueTuple<FrameWork.AssetBundlePackage.ResourcePackage, string, UnityEngine.Object> __result)
         {
-            // 如果 _activeImg 还未填充，立即构建
-            if (_activeImg.Count == 0 && _replaceImg.Count > 0)
-                RebuildActiveEntries();
-
             if (logEntryImg) MyUtils.MyLog("[HookImg] 入口: assetPath=" + (assetPath ?? "null") + " type=" + type?.Name + " activeKeys=" + string.Join(",", _activeImg.Keys));
 
             if (_activeImg.Count == 0) return true;
@@ -1254,10 +1250,6 @@ namespace UabHooker
 		public static void SkeletonGraphic_Pre_Spine(SkeletonGraphic __instance, ref bool overwrite)
         {
             if (__instance == null) return;
-
-            // 如果 _activeSpine 还未填充（DelayedRebuild 延迟一帧），立即构建
-            if (_activeSpine.Count == 0 && _replaceSpine.Count > 0)
-                RebuildActiveEntries();
 
             if (logEntrySpine)
                 MyUtils.MyLog($"[HookSpine] 入口: _activeSpine={_activeSpine.Count} _replaceSpine={_replaceSpine.Sum(kv=>kv.Value.Count)} instance={__instance.name}");
