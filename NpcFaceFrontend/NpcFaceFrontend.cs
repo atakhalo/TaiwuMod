@@ -47,6 +47,7 @@ using System.Xml.Linq;
 using GameData.Domains.Character.Creation;
 using Game.Views.EventWindow;
 using System.Diagnostics;
+using GameData.Domains.Character.AvatarSystem;
 
 namespace NpcFace
 {
@@ -273,6 +274,12 @@ namespace NpcFace
 		public static Dictionary<string, int> ImgTemplate = new Dictionary<string, int>(); // npc模板id缓存
 		public static Dictionary<string, int> spineTemplate = new Dictionary<string, int>(); // npc模板id缓存
 
+		public static bool showHuanxin = false;
+
+		public static int entryType = 0; // 是否从 display调用入口进入
+		public static CharacterDisplayData entryDisplayData = null; // displaydata缓存
+		public static bool entryResLoad = false; // display入口是否进行加载
+
 		public static bool samllSpine = false;
 
 		public static SkeletonDataAsset skeletonDataTemp;
@@ -371,6 +378,7 @@ namespace NpcFace
             ModManager.GetSetting(ModIdStr, "npcNameIdx", ref npcNameIdx);
             ModManager.GetSetting(ModIdStr, "customNpc", ref customNpc);
             ModManager.GetSetting(ModIdStr, "npcNameCustom", ref npcNameCustom);
+            ModManager.GetSetting(ModIdStr, "showHuanxin", ref showHuanxin);
 			var showDebugLog = false;
 			ModManager.GetSetting(ModIdStr, "showDebugLog", ref showDebugLog);
 			showEntryLog = showFindLog = showLoadLog = showDebugLog;
@@ -699,7 +707,7 @@ namespace NpcFace
 		/// <summary>
 		/// 根据接口信息 中的 name 尝试设置 普通npc  立绘
 		/// </summary>
-		public static bool TrySetNpcFaceByName(TaiwuAvatar avatar, CharacterAvatar? instance, AvatarRelatedData relatedData)
+		public static bool TrySetNpcFaceByName(TaiwuAvatar avatar, CharacterAvatar? instance)
         {
             // MyUtils.MyLog($"TrySetNpcFaceByName relatedData {avatar}");
             if (avatar == null) return false;
@@ -1022,7 +1030,8 @@ namespace NpcFace
 		// 之前游戏默认有开启的，更新后没有了，现在不需要了
 		public static bool QuickCheckNoInit(TaiwuAvatar __instance, out bool tobreak)
 		{
-			tobreak = false;
+			tobreak = false; // 测试用； 返回true时，一键中断所有入口的替换
+			// return true;
 
 			var ac = Traverse.Create(__instance).Field("avatarContainer").GetValue<GameObject>();
 			var gc = Traverse.Create(__instance).Field("gravestoneContainer").GetValue<GameObject>();
@@ -1050,88 +1059,138 @@ namespace NpcFace
 
 			QuickCheckNoInit(__instance, out var tobreak);
 			if(tobreak) return false;
-			OnRefreshChar_Dis_Wrapper(__instance, displayData, isShowGrave);
-			// GameApp.Instance.StartCoroutine(DelayCoroutine_OnRefreshChar_Dis(OnRefreshChar_Dis_Wrapper, 0, __instance, displayData, isShowGrave));
+
+			if (displayData.AliveState == 1 && isShowGrave) return false;
+
+			NpcFaceFrontendPlugin.entryType = 1;
+			entryDisplayData = displayData;
+			OnRefreshChar_Dis_Origin(__instance, displayData, isShowGrave);
+            var taiwuCharId = SingletonObject.getInstance<BasicGameData>().TaiwuCharId;
+			if (displayData.CharacterId == taiwuCharId)
+			{
+				if(entryResLoad)
+				{
+					if(showHuanxin) TryAddHuanxin(__instance, displayData);
+					entryResLoad = false;
+				}
+			}
+			entryDisplayData = null;
+			NpcFaceFrontendPlugin.entryType = 0;
 			return false;
 		}
 
-		private static IEnumerator DelayCoroutine_OnRefreshChar_Dis(Func<TaiwuAvatar, CharacterDisplayData, bool, bool> action, float delay, TaiwuAvatar avatar, CharacterDisplayData displayData, bool isShowGrave)
-		{
-			yield return null;
-			// if(delay > 0f) yield return new WaitForSeconds(delay);
-			action?.Invoke(avatar, displayData, isShowGrave);
-			yield break;
-		}
-
-		public static bool OnRefreshChar_Dis_Wrapper(TaiwuAvatar __instance, CharacterDisplayData displayData, bool isShowGrave)
-		{
-			if (OnRefreshChar_Dis(__instance, displayData, isShowGrave)) return true;
-			else OnRefreshChar_Dis_Origin(__instance, displayData, isShowGrave); return false;
-		}
-
 		[HarmonyReversePatch, HarmonyPatch(typeof(TaiwuAvatar), "Refresh", argumentTypes: new Type[2] { typeof(CharacterDisplayData), typeof(bool) })]
-		public static void OnRefreshChar_Dis_Origin(TaiwuAvatar __instance, CharacterDisplayData displayData, bool isShowGrave)
-		{
-			return;
-		}
+		public static void OnRefreshChar_Dis_Origin(TaiwuAvatar __instance, CharacterDisplayData displayData, bool isShowGrave) { return ;}
 
-		// [HarmonyPostfix, HarmonyPatch(typeof(TaiwuAvatar), "Refresh", argumentTypes: new Type[2] { typeof(CharacterDisplayData), typeof(bool) })]
         public static bool OnRefreshChar_Dis(TaiwuAvatar __instance, CharacterDisplayData displayData, bool isShowGrave)
         {
-            if (!npcFace) return false;
-			if(isShowGrave) return false;
-
-            var charId = displayData.CharacterId;
+			if (!npcFace) return false;
             var taiwuCharId = SingletonObject.getInstance<BasicGameData>().TaiwuCharId;
             if(displayData.CharacterId == taiwuCharId)
-            {
-                return resLoad(__instance, null, isTaiwu:true);
-            }
-			return TrySetNpcFaceByIdName(__instance, null, displayData.CharacterId);
+			{
+                if(resLoad(__instance, null, isTaiwu:true))
+				{
+					if(entryType == 1)
+						entryResLoad = true;
+					return true;
+				}
+				return false;
+			}
+			else
+				return TrySetNpcFaceByIdName(__instance, null, displayData.CharacterId);
         }
+
+		public static void TryAddHuanxin(TaiwuAvatar __instance, CharacterDisplayData displayData)
+		{
+			if (__instance.Data != null)
+			{
+				sbyte huanxinFaceStyle = CommonUtils.GetHuanxinFaceStyle(displayData);
+				displayData.AvatarRelatedData.AvatarData.HuanxinFaceStyle = huanxinFaceStyle;
+				var Data = Traverse.Create(__instance).Property("Data").GetValue<AvatarData>();
+				Data.HuanxinFaceStyle = huanxinFaceStyle;
+
+				var oldPreferDynamicAvatar = Traverse.Create(__instance).Field("preferDynamicAvatar").GetValue<bool>();
+				Traverse.Create(__instance).Field("preferDynamicAvatar").SetValue(false); // 强制静态
+				__instance.TryAddHuanxinFaceSprite();
+				Traverse.Create(__instance).Field("preferDynamicAvatar").SetValue(oldPreferDynamicAvatar);
+			}
+		}
 
 		[HarmonyPrefix, HarmonyPatch(typeof(TaiwuAvatar), "Refresh", argumentTypes: new Type[1] { typeof(AvatarRelatedData) })]
 		public static bool OnRefreshChar_Related_Pre(TaiwuAvatar __instance, AvatarRelatedData relatedData)
 		{
 			if (!npcFace) return true;
-			if(showEntryLog) MyUtils.MyLog("OnRefreshChar_Related_Pre");
+			if (showEntryLog) MyUtils.MyLog($"OnRefreshChar_Related_Pre");
+
 			QuickCheckNoInit(__instance, out var tobreak);
 			if (tobreak) return false;
-			GameApp.Instance.StartCoroutine(DelayCoroutine_OnRefreshChar_Related(OnRefreshChar_Related_Wrapper, 0, __instance, relatedData));
+
+			// 标记 入口
+			if (NpcFaceFrontendPlugin.entryType == 0)
+				NpcFaceFrontendPlugin.entryType = 2;
+			OnRefreshChar_Related_Origin(__instance, relatedData);
+			if (NpcFaceFrontendPlugin.entryType == 2)
+				NpcFaceFrontendPlugin.entryType = 0;
 			return false;
 		}
 
-		private static IEnumerator DelayCoroutine_OnRefreshChar_Related(
-			Func<TaiwuAvatar, AvatarRelatedData, bool> action, float delay, TaiwuAvatar avatar, AvatarRelatedData relatedData)
+		[HarmonyReversePatch, HarmonyPatch(typeof(TaiwuAvatar), "Refresh", argumentTypes: new Type[1] { typeof(AvatarRelatedData) })]
+		public static void OnRefreshChar_Related_Origin(TaiwuAvatar __instance, AvatarRelatedData relatedData) { return; }
+
+
+		[HarmonyPrefix, HarmonyPatch(typeof(TaiwuAvatar), "Refresh", argumentTypes: new Type[0] { })]
+		public static bool OnRefreshChar_Pre(TaiwuAvatar __instance)
+		{
+			// dis 入口
+			// 如果是 display 入口来的，用dis方法处理
+			if (NpcFaceFrontendPlugin.entryType == 1)
+			{
+				if(showEntryLog) MyUtils.MyLog("OnRefreshChar_Pre entry 1");
+				if (OnRefreshChar_Dis(__instance, entryDisplayData, isShowGrave: true))
+					return false; // 如果顺利加载，则不需原方法
+				return true;
+			}
+			// rel 入口
+			else if(NpcFaceFrontendPlugin.entryType == 2)
+			{
+				if(showEntryLog) MyUtils.MyLog("OnRefreshChar_Pre entry 2");
+				// 延迟识别
+				GameApp.Instance.StartCoroutine(DelayCoroutine_OnRefreshChar(OnRefreshChar_Wrapper, 0, __instance));
+				return false;
+			}
+			else // 其他入口，直接放行
+				return true;
+		}
+
+		private static IEnumerator DelayCoroutine_OnRefreshChar(
+			Func<TaiwuAvatar, bool> action, float delay, TaiwuAvatar avatar)
 		{
 			yield return null;
 			if (delay > 0f) yield return new WaitForSeconds(delay);
-			action?.Invoke(avatar, relatedData);
+			action?.Invoke(avatar);
 			yield break;
 		}
 
-		public static bool OnRefreshChar_Related_Wrapper(TaiwuAvatar __instance, AvatarRelatedData relatedData)
+		public static bool OnRefreshChar_Wrapper(TaiwuAvatar __instance)
 		{
 			if(!__instance || !__instance.gameObject) return true;
-			if (OnRefreshChar_Related(__instance, relatedData)) return true;
-			else OnRefreshChar_Related_Origin(__instance, relatedData); return false;
+			if (OnRefreshChar(__instance)) return true;
+			else OnRefreshChar_Origin(__instance); return false;
 		}
 
-		[HarmonyReversePatch, HarmonyPatch(typeof(TaiwuAvatar), "Refresh", argumentTypes: new Type[1] { typeof(AvatarRelatedData) })]
-		public static void OnRefreshChar_Related_Origin(TaiwuAvatar __instance, AvatarRelatedData relatedData)
-		{
-			return;
-		}
+		[HarmonyReversePatch, HarmonyPatch(typeof(TaiwuAvatar), "Refresh", argumentTypes: new Type[0] { })]
+		public static void OnRefreshChar_Origin(TaiwuAvatar __instance) { return; }
 
-		// 关系界面 主体
-		// [HarmonyPostfix, HarmonyPatch(typeof(TaiwuAvatar), "Refresh", argumentTypes: new Type[1] { typeof(AvatarRelatedData) })]
-		public static bool OnRefreshChar_Related(TaiwuAvatar __instance, AvatarRelatedData relatedData)
+		public static bool OnRefreshChar(TaiwuAvatar __instance)
         {
             if (!npcFace) return false;
-			//MyLog("OnRefreshCharRelated");
-			return TrySetNpcFaceByName(__instance, null, relatedData);
+			return TrySetNpcFaceByName(__instance, null);
         }
 
+		/// <summary>
+		/// 入口，判断是否模板人物，并进行固定模板人物处理
+		/// </summary>
+		/// <returns></returns>
 		[HarmonyPrefix, HarmonyPatch(typeof(TaiwuAvatar), "Refresh", argumentTypes: new Type[3] { typeof(AvatarRelatedData), typeof(short), typeof(sbyte) })]
 		public static bool OnRefreshChar_Related_Pre(TaiwuAvatar __instance, AvatarRelatedData relatedData, short characterTemplateId, sbyte xiangshuType)
 		{
