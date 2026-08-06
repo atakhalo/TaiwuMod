@@ -1,0 +1,55 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <BaseOutputPath></BaseOutputPath>
+	<OutputPath>C:\Program Files (x86)\Steam\steamapps\common\The Scroll Of Taiwu\Mod\改制解锁\Plugins\</OutputPath>
+	<AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="0Harmony">
+      <HintPath>..\..\..\..\..\Program Files (x86)\Steam\steamapps\common\The Scroll Of Taiwu\The Scroll of Taiwu_Data\Managed\0Harmony.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="GameData">
+      <HintPath>..\..\..\..\..\Program Files (x86)\Steam\steamapps\common\The Scroll Of Taiwu\Backend\GameData.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="GameData.Shared">
+      <HintPath>..\..\..\..\..\Program Files (x86)\Steam\steamapps\common\The Scroll Of Taiwu\Backend\GameData.Shared.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="GameData.Serializer">
+      <HintPath>..\..\..\..\..\Program Files (x86)\Steam\steamapps\common\The Scroll Of Taiwu\Backend\GameData.Serializer.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="GameData.Utilities">
+      <HintPath>..\..\..\..\..\Program Files (x86)\Steam\steamapps\common\The Scroll Of Taiwu\Backend\GameData.Utilities.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="GameData.Utilities.Structure">
+      <HintPath>..\..\..\..\..\Program Files (x86)\Steam\steamapps\common\The Scroll Of Taiwu\Backend\GameData.Utilities.Structure.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="GameData.ArchiveData">
+      <HintPath>..\..\..\..\..\Program Files (x86)\Steam\steamapps\common\The Scroll Of Taiwu\Backend\GameData.ArchiveData.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="NLog">
+      <HintPath>..\..\..\..\..\Program Files (x86)\Steam\steamapps\common\The Scroll Of Taiwu\Backend\NLog.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Redzen">
+      <HintPath>..\..\..\..\..\Program Files (x86)\Steam\steamapps\common\The Scroll Of Taiwu\Backend\Redzen.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="TaiwuModdingLib">
+      <HintPath>..\..\..\..\..\Program Files (x86)\Steam\steamapps\common\The Scroll Of Taiwu\The Scroll of Taiwu_Data\Managed\TaiwuModdingLib.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+  </ItemGroup>
+
+</Project>
