@@ -59,6 +59,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WeaveUnlockFrontend", "Weav
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SoulSwapQuickFrontend", "SoulSwapQuickFrontend\SoulSwapQuickFrontend.csproj", "{366D377F-255C-48E2-9BC5-17F3EE8ABDD5}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ChunXiaoBuYunBackend", "ChunXiaoBuYunBackend\ChunXiaoBuYunBackend.csproj", "{9706EDBE-493D-48A8-BD5E-C960BD7AC33D}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -405,6 +407,18 @@ Global
 		{366D377F-255C-48E2-9BC5-17F3EE8ABDD5}.Release|x64.Build.0 = Release|Any CPU
 		{366D377F-255C-48E2-9BC5-17F3EE8ABDD5}.Release|x86.ActiveCfg = Release|Any CPU
 		{366D377F-255C-48E2-9BC5-17F3EE8ABDD5}.Release|x86.Build.0 = Release|Any CPU
+		{9706EDBE-493D-48A8-BD5E-C960BD7AC33D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{9706EDBE-493D-48A8-BD5E-C960BD7AC33D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{9706EDBE-493D-48A8-BD5E-C960BD7AC33D}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{9706EDBE-493D-48A8-BD5E-C960BD7AC33D}.Debug|x64.Build.0 = Debug|Any CPU
+		{9706EDBE-493D-48A8-BD5E-C960BD7AC33D}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{9706EDBE-493D-48A8-BD5E-C960BD7AC33D}.Debug|x86.Build.0 = Debug|Any CPU
+		{9706EDBE-493D-48A8-BD5E-C960BD7AC33D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{9706EDBE-493D-48A8-BD5E-C960BD7AC33D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{9706EDBE-493D-48A8-BD5E-C960BD7AC33D}.Release|x64.ActiveCfg = Release|Any CPU
+		{9706EDBE-493D-48A8-BD5E-C960BD7AC33D}.Release|x64.Build.0 = Release|Any CPU
+		{9706EDBE-493D-48A8-BD5E-C960BD7AC33D}.Release|x86.ActiveCfg = Release|Any CPU
+		{9706EDBE-493D-48A8-BD5E-C960BD7AC33D}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
