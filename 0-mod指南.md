@@ -77,3 +77,24 @@ $t = $g.GetType("GameData.Domains.Building.BuildingDomain")
 $t.GetMethod("GetBuildingMakeDisplayData", [System.Reflection.BindingFlags]"Public,Instance")
 ```
 - 注意区分静态**字段**与**属性**（如 `Config.Clothing.Instance` 是字段，用 GetField 验证）
+
+
+# Unity UI 运行时按钮注入（前端 mod 常用）
+给现有界面动态添加按钮/控件时，用 clone 已有按钮 GameObject 作模板最省事（自动继承图集/字体/样式），但有几个坑：
+
+1. **绑定监听**：clone 的按钮不会带运行时 `AddListener` 的监听，需 `btn.onClick.RemoveAllListeners()` 后重新绑定
+2. **隐藏原图**：若按钮的图标与背景是同一张 Image（挂在根节点），**不能 `enabled = false`**——Unity Button 靠根 Graphic 参与点击检测，禁用后按钮点不动；应 `img.sprite = null`（隐藏但不失点击），或直接保留原图、叠加子物体文字
+3. **动态加文字（易 NRE）**：`go.AddComponent<TextMeshProUGUI>()` 后手动赋 `font`/`fontSharedMaterial` 会因字体未初始化报空引用。应 **clone 界面里已有 TMP 的 GameObject**（自带字体材质），只改 `text`
+4. **文字被顶出按钮**：clone 的 TMP 可能残留 `ContentSizeFitter`/`LayoutElement`/`LayoutGroup` 组件，需先 Destroy 再设置 `anchorMin/Max=(0,0)-(1,1)`、`offset=0`、`pivot=(0.5,0.5)`、`localPosition=0`；若父物体有布局组件，给文字加 `LayoutElement.ignoreLayout = true`
+5. **图标字符**：中文游戏字体一般内置常见 Unicode 符号（`●`/`▼`/`✓` 等），避免用生僻字形；实测显示方框/空白即字体缺字形，换常用字符
+6. **防重复注入**：注入前先 `transform.Find("固定名字")` 判断是否已存在；创建后改名固定标识
+7. 访问游戏私有字段/属性：`AccessTools.Field(typeof(X), "name")` / `AccessTools.Property(typeof(X), "name")`（注意有些 public 属性在反编译里其实是 private，如 `SwapSoulCharacterItem.Parent`）
+
+
+# AvatarData 外貌字段速查（做"一键设置外貌"类 mod 用）
+- 主体：`AvatarId`（= 体型×2+性别+1，性别=AvatarId%2，体型=(AvatarId-1)/2）、`HeadId`、部件 ID（前后发/眉/眼/鼻/嘴/胡须1·2/面部特征1·2）
+- **颜色 10 个（byte）**：`ColorSkinId`/`ColorClothId`/`ColorFrontHairId`/`ColorBackHairId`/`ColorEyebrowId`/`ColorEyeballId`/`ColorMouthId`/`ColorBeard1Id`/`ColorBeard2Id`/`ColorFeature1Id`/`ColorFeature2Id`
+- **五官微调 12 个（short）**：眼/眉各 `Height`/`Distance`/`Angle`/`Scale`，鼻/嘴各 `Height`/`Scale`（对应化形塑体界面的间距/高度/缩放/角度滑块）
+- 眼睛合法性校验：`AvatarManager.Instance.GetAvatarGroup(AvatarId).Get(EAvatarElementsType.Eye, [EyesMainId, EyesLeftId])` 返回 null 则左右眼置 0
+- `Copy()` 是**实例方法**：`new AvatarData().Copy(other)`
+- 资源按 `AvatarId`（体型+性别）组织：性别/体型不一致时，对方的外貌项可能不在本组资源里（不可全选）
