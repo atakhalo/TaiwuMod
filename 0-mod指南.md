@@ -42,7 +42,7 @@ public override void OnModSettingUpdate()
 - DLL 输出到 `游戏目录\Mod\<Mod名>\Plugins\`（后端 DLL 也可直接放 `Plugins\` 根目录；`了然` 用了 `Plugins\Back\` 子目录，后端相对路径写 `"Back/xxx.dll"`）
 - `Config.Lua`：mod 清单（Title / BackendPlugins / FrontendPlugins / Version / GameVersion / DefaultSettings 等）
 	- 后端设置项格式：`SettingType = "Toggle", Key = "xxx", DisplayName, Description, DefaultValue`
-	- 游戏当前版本：`GameVersion = "1.0.67.0"`
+	- 游戏当前版本：`GameVersion = "1.1.3"`（2026-09-22 长期测试分支；mod 与游戏 **Major/Minor 必须一致**，否则判定 Outdated、需白名单才加载；游戏版本串带 `-test` 后缀，mod 写三段的 `1.1.3` 与游戏解析结果一致）
 - `Settings.Lua`：设置值，格式 `return { key = value }`
 - 后端插件类继承 `TaiwuRemakePlugin`，`Harmony.CreateAndPatchAll`；`OnModSettingUpdate` 中读设置
 - 前端插件类同样继承 `TaiwuRemakePlugin`，设置读取用 `ModManager.GetSetting`（`using FrameWork.ModSystem`）；前端项目 `netstandard2.1`，引用 Assembly-CSharp + UnityEngine.CoreModule 即可
@@ -57,16 +57,31 @@ public override void OnModSettingUpdate()
 
 
 # 后端 DLC 判断
-- `GameData.DLC.DlcManager.IsDlcInstalled(ulong appId)` 静态方法，appId 为 Steam DLC AppId
-- 前端 `DlcManager` 里可查到各 DLC 的 AppId 常量
-- 常见 DLC AppId：GiftFromConchShip1=2241120, GiftFromConchShip2=2172690, FiveLoong=2764950, HappyNewYear2024=2764960, YearOfSnakeCloth=3464590, HappyNewYear2026=4395170, EightYears=4834440, GreenHillsRemain=4834450
+- `GameData.DLC.DlcManager.IsDlcInstalled(ulong appId)` 静态方法，appId 为 Steam DLC AppId（未初始化/游戏外调用时 `_dlcInfoList` 为 null，会 NRE）
+- **DlcName → AppId 不要写死**：查游戏配置表 `Config.ImplementedDlc`（`ImplementedDlcItem.Name` = DlcName，`.AppId` = Steam AppId；后端启动时 `GlobalDomain.ReloadAllConfigData()` → `Parallel.ForEach(ConfigCollection.Items, item => item.Init())` 已把全表初始化，含 `ImplementedDlc.Instance`）
+	- 该表随游戏更新，游戏新增 DLC 时自带新行 ⇒ mod 无需随版本补映射
+	- 表里查不到的 DlcName ⇒ 不是 DLC 内容（mod 自加），可按"保留"处理
+	- 注意 `ConfigData.Init()` 只有部分表是"清空+重建"，`ImplementedDlc.Init()` 是 `_dataArray.Add`，**不要主动重复调用**（会翻倍），只读即可
+- 前端 `DlcManager` 里也有各 DLC 的 AppId/名字常量（`DlcIdXxx` / `DlcNameXxx`），仅在需要前端判断时用
+- 判断某个 DLC 是否真装了（排除"目录存在但没买"的干扰）：
+	- 最准：读 `steamapps\appmanifest_838350.acf` 的 `InstalledDepots` 里带 `dlcappid` 的条目
+	- 辅助：后端日志 `Start loading Dlc Events:` 之后的 `DLC: <appid>_<ver>, Path: ...` 行
+
+
+# 游戏更新后的 mod 适配清单（实测流程）
+1. 更新 `Config.Lua`：`GameVersion` 对齐当前游戏主要版本、`Version` 递增（不改 GameVersion 会被判 Outdated，需要玩家手动加白名单）
+2. 对比新旧配置表（`太吾配置表旧-0922` vs `太吾配置表`）看新增行是否触发 mod 的硬编码假设：衣装新增 `DlcName=TaiwuAsXiangshu`（玄相法身 30015）就是本次 1.1.3 适配的坑
+3. 用旧源码目录（`TaiwuSourceFront2026Old`）diff 新源码（`TaiwuSourceFront2026`），确认 patch 目标方法仍存在、签名未变
+4. 重新编译（csproj 的 OutputPath 已指向游戏 Mod 目录，编译即部署）
+5. 游戏日志位置：后端 `游戏目录\Logs\GameData_*.log`；前端 `%USERPROFILE%\AppData\LocalLow\Conchship\The Scroll of Taiwu\Player.log`（上一轮 `Player-prev.log`）
 
 
 # DLC 专属内容经验（易踩坑）
-- DLC 专属**衣装/外观**的 avatar 图集只在安装对应 DLC 时才加载（前端 `AvatarAtlasAssets.TryLoadDlcAvatars` 按 `IsDlcInstalled` 加载 `{dlc}_avatarpackers`）
-- 若未安装 DLC 就引用其外观，前端渲染会报错：`Failed to find atlas avatar_6_cloth_30012_normal`
+- DLC 专属**衣装/外观**的 avatar 图集只在安装对应 DLC 时才加载（前端 `AvatarAtlasAssets.TryLoadDlcAvatars` 按 `IsDlcInstalled` 加载 `{dlc}_avatar_packers`）
+- 若未安装 DLC 就引用其外观，前端渲染会报错：`Failed to load Resource GameAtlas/AvatarPackers/avatar_6_cloth_30015_normal`（图集名 = `avatar_{avatarId}_cloth_{DisplayId}_{big|normal|small}`）
 - 配置表里 DLC 专属物品通常有 `DlcName` 字段标记（衣装为 `ClothingItem.DlcName`，public readonly 字段）
-- 做"解锁全部 xxx"类 mod 时，必须过滤掉 `DlcName` 非空且对应 DLC 未安装的内容
+- 做"解锁全部 xxx"类 mod 时，必须过滤掉 `DlcName` 非空且对应 DLC 未安装的内容；**用配置表 `ImplementedDlc` 查 AppId，不要硬编码映射表**（游戏新增 DLC 时不必改 mod；查不到的名字按"非 DLC 内容"保留）
+- 判断代码要**容错**：读配置表失败/未就绪时只记日志并跳过过滤，不能让异常从 Harmony patch 抛出去（会连累整个界面的数据下发）
 
 
 # 调试技巧
