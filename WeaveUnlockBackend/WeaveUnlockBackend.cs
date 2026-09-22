@@ -18,10 +18,12 @@ namespace WeaveUnlockBackend
     ///       本 mod 只在该方法返回时把列表替换为全部衣装模板，不改动任何存档数据，
     ///       后端执行改制的 WeaveClothingItem 本身也没有解锁校验，因此完全非侵入。
     /// 注意：DLC 专属衣装（ClothingItem.DlcName 非空）对应的外观图集只在安装对应 DLC 时才加载，
-    ///       若未安装 DLC 就把该衣装塞进列表，前端渲染卡片会报 "Failed to find atlas ..." 错误。
-    ///       因此这里会过滤掉「DlcName 非空且对应 DLC 未安装」的衣装。
+    ///       若未安装 DLC 就把该衣装塞进列表，前端渲染卡片会报
+    ///       "Failed to load Resource GameAtlas/AvatarPackers/avatar_x_cloth_xxxxx_normal"。
+    ///       因此这里会过滤掉「DlcName 对应 DLC 未安装」的衣装；
+    ///       DlcName → AppId 的对应关系直接查游戏配置表 Config.ImplementedDlc，游戏新增 DLC 时无需改本 mod。
     /// </summary>
-    [PluginConfig(pluginName: "WeaveUnlock", creatorId: "atakhalo", pluginVersion: "0.1.1.1")]
+    [PluginConfig(pluginName: "WeaveUnlock", creatorId: "atakhalo", pluginVersion: "0.1.3.0")]
     public class WeaveUnlockBackendPlugin : TaiwuRemakePlugin
     {
         private Harmony? harmony;
@@ -30,19 +32,8 @@ namespace WeaveUnlockBackend
         /// <summary>总开关：改制解锁</summary>
         public static bool pluginEnable = true;
 
-        /// <summary>衣装 DlcName → Steam DLC AppId（与前端 DlcManager 一致）</summary>
-        private static readonly Dictionary<string, ulong> DlcNameToAppId = new Dictionary<string, ulong>
-        {
-            { "GiftFromConchShip1", 2241120 },
-            { "GiftFromConchShip2", 2172690 },
-            { "InteractOfLove", 0 },
-            { "FiveLoong", 2764950 },
-            { "HappyNewYear2024", 2764960 },
-            { "YearOfSnakeCloth", 3464590 },
-            { "HappyNewYear2026", 4395170 },
-            { "EightYears", 4834440 },
-            { "GreenHillsRemain", 4834450 },
-        };
+        /// <summary>DlcName → Steam AppId 映射缓存（来源：游戏配置表 ImplementedDlc）</summary>
+        private static Dictionary<string, uint>? cachedDlcNameToAppId;
 
         public static void MyLog(string log)
         {
@@ -78,6 +69,7 @@ namespace WeaveUnlockBackend
                 return;
             }
 
+            Dictionary<string, uint> dlcNameToAppId = GetDlcNameToAppIdMap();
             List<short> allKeys = Clothing.Instance.GetAllKeys();
             List<short> available = new List<short>(allKeys.Count);
             foreach (short templateId in allKeys)
@@ -87,17 +79,72 @@ namespace WeaveUnlockBackend
                 {
                     continue;
                 }
-                if (!string.IsNullOrEmpty(clothing.DlcName)
-                    && DlcNameToAppId.TryGetValue(clothing.DlcName, out ulong appId)
-                    && appId > 0
-                    && !DlcManager.IsDlcInstalled(appId))
+
+                string? dlcName = clothing.DlcName;
+                if (!string.IsNullOrEmpty(dlcName) && !IsDlcContentAvailable(dlcName, dlcNameToAppId))
                 {
                     continue;
                 }
+
                 available.Add(templateId);
             }
 
             __result.OwnedClothingList = available;
+        }
+
+        /// <summary>
+        /// 取 DlcName → Steam AppId 映射，来源是游戏自身的 DLC 配置表 Config.ImplementedDlc，
+        /// 因此游戏新增 DLC 时本 mod 无需改动。配置表尚未就绪（读到空表）时不缓存，下次再读。
+        /// </summary>
+        private static Dictionary<string, uint> GetDlcNameToAppIdMap()
+        {
+            if (cachedDlcNameToAppId != null)
+            {
+                return cachedDlcNameToAppId;
+            }
+
+            Dictionary<string, uint> map = new Dictionary<string, uint>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                foreach (ImplementedDlcItem dlc in ImplementedDlc.Instance)
+                {
+                    if (!string.IsNullOrEmpty(dlc.Name))
+                    {
+                        map[dlc.Name] = dlc.AppId;
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                // 配置表异常只影响过滤精度，不应连累改制界面的数据下发
+                MyLog($"读取 DLC 配置表失败，本次不做 DLC 过滤：{e.Message}");
+                return map;
+            }
+
+            if (map.Count > 0)
+            {
+                cachedDlcNameToAppId = map;
+                MyLog($"已从配置表 ImplementedDlc 读入 {map.Count} 条 DLC 映射");
+            }
+            else
+            {
+                MyLog("DLC 配置表 ImplementedDlc 尚未就绪，本次不做 DLC 过滤");
+            }
+            return map;
+        }
+
+        /// <summary>
+        /// 判断 DLC 衣装当前是否可用：未安装 DLC 的衣装没有外观图集，下发到前端渲染会报
+        /// "Failed to load Resource GameAtlas/AvatarPackers/avatar_x_cloth_xxxxx_normal"。
+        /// DlcName 不在 DLC 配置表里的一律保留（如 mod 自加内容，其外观图集由 mod 自己提供）。
+        /// </summary>
+        private static bool IsDlcContentAvailable(string dlcName, Dictionary<string, uint> dlcNameToAppId)
+        {
+            if (!dlcNameToAppId.TryGetValue(dlcName, out uint appId))
+            {
+                return true;
+            }
+            return appId == 0 || DlcManager.IsDlcInstalled(appId);
         }
     }
 }
