@@ -2122,6 +2122,8 @@ namespace NpcFace
 				{
 					var i = Traverse.Create(avatar).Field("cloth").GetValue<CImage>();
 					i.rectTransform.sizeDelta = GetSizeWH(avatar.Size);
+					// 游戏 Refresh 时按图片原始尺寸算过偏移，改成目标尺寸后需要重新应用一次
+					ReapplyAvatarOffset(avatar);
 				}
 
 				if (instance == null) return true; // 上面已经替换成功了，这里只是检查是否要回调
@@ -2233,6 +2235,23 @@ namespace NpcFace
 			if(avatarSize == TaiwuAvatarSize.Normal) return new Vector2(360, 440);
 			if (avatarSize == TaiwuAvatarSize.Small) return new Vector2(180, 220);
 			return new Vector2(720, 880);
+		}
+
+		/// <summary>
+		/// 重新应用游戏的头像偏移（ApplyAvatarOffset 是 internal，只能反射调用）
+		/// </summary>
+		private static void ReapplyAvatarOffset(TaiwuAvatar avatar)
+		{
+			try
+			{
+				typeof(TaiwuAvatar)
+					.GetMethod("ApplyAvatarOffset", BindingFlags.Instance | BindingFlags.NonPublic)
+					?.Invoke(avatar, new object[] { null });
+			}
+			catch (Exception e)
+			{
+				MyUtils.MyLog($"ReapplyAvatarOffset 失败: {e.Message}");
+			}
 		}
 
 
